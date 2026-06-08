@@ -16,9 +16,9 @@ class AgentRole:
 DEFAULT = AgentRole(
     name="default",
     system_prompt=(
-        "You are Calamar, an AI coding agent. You help users with software "
-        "engineering tasks: fixing bugs, adding features, refactoring code, "
-        "and explaining codebases. Be concise and precise."
+        "You are Calamar, a general-purpose AI agent. You help users with "
+        "coding, data analysis, file management, and information tasks. "
+        "Be concise and precise. Use tools to accomplish tasks."
     ),
 )
 
