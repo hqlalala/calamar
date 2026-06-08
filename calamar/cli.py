@@ -25,6 +25,9 @@ HELP_TEXT = """
   /model    Show or switch model
   /cost     Show session cost
   /verbose  Toggle verbose mode
+  /undo     Undo last agent change
+  /diff     Show uncommitted changes
+  /branch   Show current branch
   /exit     Exit
 """
 
@@ -99,6 +102,32 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                 renderer = TerminalRenderer(verbose=verbose)
                 state = "on" if verbose else "off"
                 con.print(f"[dim]Verbose mode: {state}[/dim]")
+                continue
+            elif cmd in ("/undo", "/undo --all"):
+                if cmd == "/undo --all":
+                    reverted = await agent.git.undo_all()
+                    if reverted:
+                        names = ", ".join(r.sha for r in reverted)
+                        con.print(f"[dim]Reverted {len(reverted)} commits: {names}[/dim]")
+                    else:
+                        con.print("[dim]No agent commits to undo.[/dim]")
+                else:
+                    reverted = await agent.git.undo_last()
+                    if reverted:
+                        con.print(f"[dim]Reverted {reverted.sha}: {reverted.message}[/dim]")
+                    else:
+                        con.print("[dim]No agent commits to undo.[/dim]")
+                continue
+            elif cmd == "/diff":
+                diff_text = await agent.git.diff()
+                if diff_text:
+                    con.print(diff_text)
+                else:
+                    con.print("[dim]No uncommitted changes.[/dim]")
+                continue
+            elif cmd == "/branch":
+                branch = await agent.git.current_branch()
+                con.print(f"[dim]Branch: {branch or '(detached)'}[/dim]")
                 continue
 
         try:

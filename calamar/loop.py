@@ -29,6 +29,7 @@ from calamar.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+from calamar.git.workflow import GitWorkflow
 from calamar.middleware import (
     CostMiddleware,
     InputGuardrail,
@@ -90,6 +91,8 @@ class AgentLoop:
 
         self._inject_repo_map(config.project_root or ".")
 
+        self._git = GitWorkflow(config.project_root or ".")
+
     @property
     def history(self) -> list[Message]:
         return self._history
@@ -98,8 +101,14 @@ class AgentLoop:
     def role(self) -> AgentRole:
         return self._role
 
+    @property
+    def git(self) -> GitWorkflow:
+        return self._git
+
     def inject_steering(self, instruction: str) -> None:
         self._steering_queue.put_nowait(instruction)
+
+    _FILE_TOOLS = {"file_write", "file_edit", "terminal"}
 
     async def run(self, user_input: str) -> AsyncIterator[Event]:
         turn_id = uuid.uuid4().hex[:12]
@@ -110,6 +119,7 @@ class AgentLoop:
         tool_call_count = 0
         total_tokens = 0
         total_cost = 0.0
+        has_file_changes = False
 
         for _iteration in range(self._config.max_turns):
             self._drain_steering()
@@ -188,11 +198,17 @@ class AgentLoop:
                     duration_ms=ctx.metadata.get("duration_ms", 0),
                 )
                 tool_call_count += 1
+                if name in self._FILE_TOOLS:
+                    has_file_changes = True
 
             if self._compactor.needs_compaction(self._history):
                 before = len(self._history)
                 self._history = await self._compactor.compact(self._history)
                 yield CompactionEvent(from_tokens=before, to_tokens=len(self._history))
+
+        if has_file_changes and await self._git.is_repo():
+            summary = self._summarize_turn(user_input, tool_call_count)
+            await self._git.auto_commit(summary)
 
         yield TurnEndEvent(
             turn_id=turn_id,
@@ -247,3 +263,9 @@ class AgentLoop:
                 )
         except Exception:
             pass
+
+    def _summarize_turn(self, user_input: str, tool_calls: int) -> str:
+        truncated = user_input[:80].replace("\n", " ").strip()
+        if len(user_input) > 80:
+            truncated += "..."
+        return f"{truncated} ({tool_calls} tool calls)"
