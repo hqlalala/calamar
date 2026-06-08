@@ -142,7 +142,8 @@ calamar/
 │   ├── registry.py  # 工具注册和分发
 │   ├── terminal.py  # 终端命令执行
 │   ├── file.py      # 文件读写编辑
-│   └── search.py    # 代码/文件搜索
+│   ├── search.py    # 代码/文件搜索
+│   └── code_index.py # code_map + code_locate 工具
 ├── code_index/      # 代码理解
 │   ├── repo_map.py  # tree-sitter 符号图
 │   └── locator.py   # 层级式代码定位
@@ -179,8 +180,8 @@ calamar/
 
 ### v0.3 — 代码理解
 
-- [ ] tree-sitter Repo Map
-- [ ] 层级式代码定位
+- [x] tree-sitter Repo Map
+- [x] 层级式代码定位
 - [ ] sqlite-vec 向量索引
 
 ### v0.4 — Git 原生
