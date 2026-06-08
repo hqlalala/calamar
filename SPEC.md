@@ -1,28 +1,20 @@
 # Calamar Specification
 
-Calamar 是一个可嵌入的 AI agent 引擎，为构建编码代理和自动化工具提供核心运行时。它不是一个完整的产品，而是产品的引擎——就像 V8 之于 Chrome，SQLite 之于 iOS。
+Calamar 是一个开箱即用的通用 AI agent。安装即可在终端使用，无需额外配置。支持编码、数据分析、文件处理、信息检索等多种任务场景。
 
 ## 定位
 
-```
-                    完整产品
-                 (Cursor, Devin)
-                       ↑
-                  产品框架层
-              (Claude Code, Aider)
-                       ↑
-              ┌────────────────┐
-              │    Calamar     │  ← 我们在这里
-              │  Agent Engine  │
-              └────────────────┘
-                       ↑
-                  模型 API 层
-           (OpenAI SDK, Anthropic SDK)
+```bash
+pip install calamar
+calamar                              # 交互式 REPL
+calamar "重构 auth 模块"               # 编码任务
+calamar "分析 sales.csv 的趋势"        # 数据分析
+calamar "帮我整理这个目录的文件"         # 文件处理
 ```
 
-**不做什么**：不做 IDE 插件、不做 Web UI、不做平台集成、不做用户账户系统。这些是上层产品的事。
+对标产品：Claude Code / Aider / Hermes，而非 SDK 或框架。用户是开发者和高级用户，不是框架消费者。
 
-**只做什么**：agent loop、工具系统、上下文管理、模型路由、中间件管线、多 agent 协作。做好这一层，做到极致。
+**差异化不在功能多，在核心机制强**：智能模型路由省钱、中间件管线保安全、代码索引提精度、三代理协作提准确率。这些不是 feature list，是用户切实感知到的"更便宜、更安全、更准"。
 
 ## 设计哲学
 
@@ -31,19 +23,9 @@ Calamar 是一个可嵌入的 AI agent 引擎，为构建编码代理和自动�
 每个模块的公开 API 不超过 5 个方法。宁可让用户组合简单的原语，不提供一个复杂的万能接口。
 
 ```python
-# 好：三行启动一个 agent
 agent = AgentLoop(config)
 async for event in agent.run("fix the bug"):
     handle(event)
-
-# 坏：需要理解 15 个概念才能开始
-orchestrator = Orchestrator(
-    planner=Planner(strategy=TreeOfThought()),
-    executor=Executor(sandbox=DockerSandbox()),
-    verifier=Verifier(criteria=TestSuite()),
-    memory=VectorMemory(embedder=OpenAIEmbedder()),
-    ...
-)
 ```
 
 ### 2. 中间件优于继承
@@ -53,33 +35,30 @@ orchestrator = Orchestrator(
 ```python
 pipeline = (
     MiddlewarePipeline()
-    .use(InputGuardrail())      # 安全检查
-    .use(PermissionGate())      # 权限控制
-    .use(CostTracker())         # 成本追踪
-    .use(RateLimiter())         # 速率限制
-    .use(OutputGuardrail())     # 输出过滤
+    .use(InputGuardrail())
+    .use(PermissionGate())
+    .use(CostTracker())
+    .use(OutputGuardrail())
 )
 ```
 
-### 3. 事件流，不是回调
+### 3. 事件流驱动
 
-Agent 的所有输出通过 `AsyncIterator[Event]` 流式返回。消费方自行决定如何处理——打印到终端、发送到 WebSocket、写入日志、触发 webhook。引擎不关心。
+Agent 的所有输出通过 `AsyncIterator[Event]` 流式返回。终端 REPL、Web UI、API server 都是同一个事件流的不同消费者。
 
 ### 4. 模型无关
 
-引擎不绑定任何特定模型或提供商。任何兼容 OpenAI Chat Completions API 的端点都可以直接使用。Anthropic、Gemini 等原生 API 通过可选 adapter 接入。
+不绑定任何特定模型或提供商。任何兼容 OpenAI Chat Completions API 的端点都可以直接使用。Anthropic、Gemini 等原生 API 通过可选 adapter 接入。
 
 ### 5. 可测试性第一
 
-每个组件都可以独立实例化和测试，不需要启动整个 agent、不需要真实 API key、不需要网络。Mock 一个 Tool 只需要实现两个方法。
+每个组件都可以独立实例化和测试，不需要启动整个 agent、不需要真实 API key、不需要网络。
 
 ## 核心概念
 
 ### AgentLoop
 
-引擎的心脏。单线程、回合制、flat 消息历史。
-
-一个 turn 的生命周期：
+单线程、回合制、flat 消息历史。
 
 ```
 用户输入
@@ -110,73 +89,30 @@ class Tool(Protocol):
     async def execute(self, **kwargs) -> ToolResult: ...
 ```
 
-两个方法，没有第三个。`spec` 描述工具的能力（自动转换为 OpenAI function schema），`execute` 执行操作。ToolResult 只有 `output` 和 `error` 两个字段。
-
 工具通过 ToolRegistry 管理，支持运行时动态注册/注销。MCP 工具和内置工具在 registry 层统一，对 agent 完全透明。
 
 ### Middleware
 
-中间件是一个洋葱模型：
+洋葱模型：
 
 ```
 请求 → [Guard] → [Permission] → [Cost] → [Execute] → [Trace] → 结果
 结果 ← [Guard] ← [Permission] ← [Cost] ← [Execute] ← [Trace] ← 结果
 ```
 
-每个中间件可以：
-- 拦截并阻止执行（guardrail 发现危险操作）
-- 修改输入（参数转换、默认值注入）
-- 修改输出（密钥脱敏、结果截断）
-- 记录副作用（成本累计、追踪日志）
-- 直接放行到下一层
+每个中间件可以拦截、修改输入/输出、记录副作用、或直接放行。
 
 ### Context
 
-上下文管理的核心思想：**静态前缀 + 动态后缀**。
-
-```
-┌────────────────────────────┐
-│ System Prompt              │ ← 静态前缀（跨 turn 不变）
-│ Tool Definitions           │    命中 prompt cache
-│ Project Context Files      │
-├────────────────────────────┤
-│ Conversation History       │ ← 动态后缀（每 turn 变化）
-│ (older turns may be        │
-│  summarized or removed)    │
-└────────────────────────────┘
-```
-
-当上下文逼近窗口上限时，4 级渐进压缩自动介入：
-1. 截断冗长的工具输出
-2. 摘要早期对话轮次
-3. 精简系统上下文
-4. 紧急压缩（只保留最近 2-3 轮）
+**静态前缀 + 动态后缀**，最大化 prompt cache 命中率。4 级渐进压缩处理长会话。
 
 ### ModelRouter
 
-根据任务画像自动选择最优模型。不是 magic，是规则引擎：
-
-```yaml
-routing:
-  rules:
-    - match: { complexity: simple }
-      model: haiku
-    - match: { task_type: bug_fix }
-      model: opus
-  default: sonnet
-```
-
-分类器是轻量级的（关键词 + 长度，不调 LLM），误判的成本是用了一个稍贵/稍便宜的模型，不是灾难。
+规则引擎，根据任务画像自动选择最优模型。分类器是轻量级的（不调 LLM）。
 
 ### AgentRole
 
-角色是可热插拔的 system prompt + toolset 组合。同一个 AgentLoop 可以在 turn 之间切换角色，实现多 agent 协作而不需要多个进程。
-
-内置四个角色：
-- **default**：通用 agent
-- **planner**：只读分析，不做修改
-- **executor**：精确执行计划
-- **verifier**：测试和验证
+可热插拔的 system prompt + toolset 组合。内置四个角色：default、planner、executor、verifier。
 
 ## 技术约束
 
@@ -187,46 +123,46 @@ routing:
 | 异步 | 全 async/await，基于 asyncio |
 | 类型 | 100% 类型注解，通过 ruff 检查 |
 | 测试 | 每个模块都有单元测试，不依赖网络 |
-| 包体积 | 核心引擎 < 2000 行代码 |
 | 零配置启动 | `Config()` + 一个环境变量即可运行 |
 
 ## 模块边界
 
 ```
 calamar/
-├── loop.py          # AgentLoop — 主循环，引擎的心脏
-├── events.py        # Event 类型 — 引擎的输出协议
-├── config.py        # Config — 引擎的输入协议
-├── context.py       # ContextBuilder + Compactor — 上下文管理
-├── middleware.py     # MiddlewarePipeline — 横切关注点
-├── router.py        # ModelRouter — 模型选择策略
-├── roles.py         # AgentRole — 角色模板
+├── cli.py           # CLI 入口 + 交互式 REPL
+├── loop.py          # AgentLoop — 主循环
+├── events.py        # Event 类型 — 输出协议
+├── config.py        # Config — 输入协议
+├── context.py       # ContextBuilder + Compactor
+├── middleware.py     # MiddlewarePipeline
+├── router.py        # ModelRouter
+├── roles.py         # AgentRole
 ├── tools/           # 工具系统
 │   ├── base.py      # Tool 协议 + ToolResult
-│   └── registry.py  # ToolRegistry — 工具注册和分发
-├── code_index/      # 代码理解（Phase 2）
+│   ├── registry.py  # 工具注册和分发
+│   ├── terminal.py  # 终端命令执行
+│   ├── file.py      # 文件读写编辑
+│   └── search.py    # 代码/文件搜索
+├── code_index/      # 代码理解
 │   ├── repo_map.py  # tree-sitter 符号图
 │   └── locator.py   # 层级式代码定位
-└── git/             # Git 工作流（Phase 2）
+└── git/             # Git 工作流
     └── workflow.py  # 自动 commit、分支、回滚
 ```
 
-每个文件的职责单一、边界清晰。任何两个文件之间的依赖关系都应该是单向的。循环依赖是 bug。
-
 ## 质量标准
 
-- **每个 PR 必须包含测试**，无测试不合并
-- **ruff 零警告**，CI 强制检查
-- **公开 API 必须有类型注解**，内部函数可省略
-- **commit message 遵循 conventional commits**：`feat:` / `fix:` / `refactor:` / `test:` / `docs:`
-- **不引入非必要依赖**，每个新依赖需要说明理由
+- 每个 PR 必须包含测试，无测试不合并
+- ruff 零警告，CI 强制检查
+- 公开 API 必须有类型注解
+- commit message 遵循 conventional commits
+- 不引入非必要依赖，每个新依赖需要说明理由
 
 ## 路线图
 
-### v0.1 — 引擎核心（当前）
+### v0.1 — 核心骨架（当前）
 
-- [x] AgentLoop 主循环
-- [x] Event 流式输出
+- [x] AgentLoop 主循环 + 事件流
 - [x] ToolRegistry + Tool 协议
 - [x] ContextBuilder + 4 级压缩
 - [x] MiddlewarePipeline（guardrail、cost、timing）
@@ -234,35 +170,32 @@ calamar/
 - [x] AgentRole 角色系统
 - [x] 18 个单元测试
 
-### v0.2 — 可用的 Agent
+### v0.2 — 可交互的 Agent
 
-- [ ] 内置工具：terminal、file_read、file_edit、file_write、search_code
-- [ ] 端到端测试：真实 LLM API 调用
-- [ ] CLI 交互模式（REPL）
-- [ ] 流式输出到终端
+- [ ] 内置工具：terminal、file_read、file_edit、file_write、search
+- [ ] CLI 交互式 REPL
+- [ ] 流式终端输出（rich/prompt_toolkit）
+- [ ] 端到端真实 API 调用
 
 ### v0.3 — 代码理解
 
-- [ ] tree-sitter Repo Map（符号图）
-- [ ] 层级式代码定位（仓库 → 文件 → 函数）
-- [ ] sqlite-vec 向量索引（可选增强）
+- [ ] tree-sitter Repo Map
+- [ ] 层级式代码定位
+- [ ] sqlite-vec 向量索引
 
 ### v0.4 — Git 原生
 
-- [ ] 自动 commit（agent 编辑后自动提交）
-- [ ] 分支隔离（复杂任务自动创建 feature branch）
-- [ ] 安全回滚（一键 revert agent 的修改）
+- [ ] 自动 commit + 分支隔离
+- [ ] 安全回滚
 
-### v0.5 — 多 Agent 协作
+### v0.5 — 多 Agent
 
-- [ ] 三代理模式（Planner → Executor → Verifier）
-- [ ] Subagent 委托（独立上下文的子 agent）
-- [ ] 并行扇出（多个子 agent 同时工作）
+- [ ] 三代理协作（Planner → Executor → Verifier）
+- [ ] Subagent 委托 + 并行扇出
 
 ### v1.0 — 生产就绪
 
 - [ ] MCP 工具集成
-- [ ] 全链路追踪（OpenTelemetry）
-- [ ] Session 持久化和恢复
-- [ ] Session 分叉（fork 对话尝试不同方案）
-- [ ] 完整文档和示例
+- [ ] 全链路追踪
+- [ ] Session 持久化 + 分叉
+- [ ] 完整文档
