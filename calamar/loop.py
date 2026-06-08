@@ -88,6 +88,8 @@ class AgentLoop:
             tool_schemas=self._tools.to_openai_tools(),
         )
 
+        self._inject_repo_map(config.project_root or ".")
+
     @property
     def history(self) -> list[Message]:
         return self._history
@@ -229,3 +231,19 @@ class AgentLoop:
         if cache:
             token_usage.cache_read_tokens = getattr(cache, "cached_tokens", 0)
         return token_usage
+
+    def _inject_repo_map(self, project_root: str) -> None:
+        try:
+            from calamar.code_index.repo_map import RepoMap
+        except ImportError:
+            return
+
+        try:
+            repo_map = RepoMap(project_root)
+            text = repo_map.render(max_tokens=2000)
+            if text.strip():
+                self._context_builder.add_context_file(
+                    f"# Repository Structure\n\n{text}"
+                )
+        except Exception:
+            pass
