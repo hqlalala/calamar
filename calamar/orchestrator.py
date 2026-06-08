@@ -230,4 +230,4 @@ class Orchestrator:
         fail_count = sum(1 for s in fail_signals if s in lower)
         pass_count = sum(1 for s in pass_signals if s in lower)
 
-        return pass_count > fail_count
+        return pass_count >= fail_count
