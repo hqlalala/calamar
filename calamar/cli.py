@@ -1,35 +1,156 @@
-"""Minimal CLI entry point."""
+"""CLI entry point — interactive REPL and one-shot mode."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import os
 import sys
 
 from calamar.config import Config
 from calamar.events import ErrorEvent, TextEvent, ToolEvent
 from calamar.loop import AgentLoop
+from calamar.render import TerminalRenderer
+from calamar.tools.defaults import create_default_registry
+
+BANNER = """\
+[bold]calamar[/bold] [dim]v0.2[/dim]
+[dim]Type your message, or /help for commands. Ctrl+C to interrupt, Ctrl+D to exit.[/dim]
+"""
+
+HELP_TEXT = """
+[bold]Commands:[/bold]
+  /help     Show this help
+  /clear    Clear conversation history
+  /model    Show or switch model
+  /cost     Show session cost
+  /verbose  Toggle verbose mode
+  /exit     Exit
+"""
 
 
-async def _run(prompt: str) -> None:
-    config = Config()
-    agent = AgentLoop(config)
+def _build_config(args: argparse.Namespace) -> Config:
+    api_key = args.api_key or os.environ.get(
+        "OPENAI_API_KEY",
+        os.environ.get("ANTHROPIC_API_KEY", ""),
+    )
+    base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
+
+    return Config(
+        model=args.model,
+        api_key=api_key,
+        base_url=base_url,
+        project_root=os.getcwd(),
+    )
+
+
+async def _run_once(prompt: str, config: Config, verbose: bool) -> None:
+    renderer = TerminalRenderer(verbose=verbose)
+    tools = create_default_registry(working_dir=config.project_root or ".")
+    agent = AgentLoop(config, tools=tools)
 
     async for event in agent.run(prompt):
-        if isinstance(event, TextEvent):
-            print(event.text)
-        elif isinstance(event, ToolEvent):
-            print(f"[tool:{event.tool_name}] {event.result}")
-        elif isinstance(event, ErrorEvent):
-            print(f"[error] {event.error}", file=sys.stderr)
+        renderer.render(event)
+
+
+async def _run_repl(config: Config, verbose: bool) -> None:
+    from rich.console import Console
+
+    con = Console()
+    con.print(BANNER)
+
+    renderer = TerminalRenderer(verbose=verbose)
+    tools = create_default_registry(working_dir=config.project_root or ".")
+    agent = AgentLoop(config, tools=tools)
+    total_cost = 0.0
+
+    while True:
+        try:
+            con.print()
+            user_input = con.input("[bold green]>[/bold green] ")
+        except (EOFError, KeyboardInterrupt):
+            con.print("\n[dim]Goodbye.[/dim]")
+            break
+
+        user_input = user_input.strip()
+        if not user_input:
+            continue
+
+        if user_input.startswith("/"):
+            cmd = user_input.lower()
+            if cmd in ("/exit", "/quit", "/q"):
+                con.print("[dim]Goodbye.[/dim]")
+                break
+            elif cmd == "/help":
+                con.print(HELP_TEXT)
+                continue
+            elif cmd == "/clear":
+                agent._history.clear()
+                con.print("[dim]History cleared.[/dim]")
+                continue
+            elif cmd == "/model":
+                con.print(f"[dim]Current model: {config.model}[/dim]")
+                continue
+            elif cmd == "/cost":
+                con.print(f"[dim]Session cost: ${total_cost:.4f}[/dim]")
+                continue
+            elif cmd == "/verbose":
+                verbose = not verbose
+                renderer = TerminalRenderer(verbose=verbose)
+                state = "on" if verbose else "off"
+                con.print(f"[dim]Verbose mode: {state}[/dim]")
+                continue
+
+        try:
+            async for event in agent.run(user_input):
+                renderer.render(event)
+                if hasattr(event, "cost_usd"):
+                    total_cost += event.cost_usd
+        except KeyboardInterrupt:
+            con.print("\n[dim]Interrupted.[/dim]")
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: calamar <prompt>")
+    parser = argparse.ArgumentParser(
+        prog="calamar",
+        description="A general-purpose AI agent.",
+    )
+    parser.add_argument(
+        "prompt", nargs="*", default=[],
+        help="One-shot prompt (omit for interactive REPL)",
+    )
+    parser.add_argument(
+        "--model", "-m", default="claude-sonnet-4-6-20250514",
+        help="Model to use (default: claude-sonnet-4-6-20250514)",
+    )
+    parser.add_argument(
+        "--api-key", "-k", default="",
+        help="API key (or set OPENAI_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--base-url", "-u", default="",
+        help="API base URL (or set OPENAI_BASE_URL env var)",
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Show detailed tool output",
+    )
+
+    args = parser.parse_args()
+    config = _build_config(args)
+
+    if not config.api_key:
+        print(
+            "Error: No API key. Set OPENAI_API_KEY or use --api-key.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    prompt = " ".join(sys.argv[1:])
-    asyncio.run(_run(prompt))
+    if args.prompt:
+        prompt = " ".join(args.prompt)
+        asyncio.run(_run_once(prompt, config, args.verbose))
+    else:
+        asyncio.run(_run_repl(config, args.verbose))
 
 
 if __name__ == "__main__":

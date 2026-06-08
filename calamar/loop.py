@@ -38,6 +38,7 @@ from calamar.middleware import (
 )
 from calamar.roles import DEFAULT, AgentRole
 from calamar.router import ModelRouter
+from calamar.tools.defaults import create_default_registry
 from calamar.tools.registry import ToolRegistry
 
 
@@ -59,7 +60,9 @@ class AgentLoop:
     ) -> None:
         self._config = config
         self._role = role or DEFAULT
-        self._tools = tools or ToolRegistry()
+        self._tools = tools or create_default_registry(
+            working_dir=config.project_root or ".",
+        )
         self._history: list[Message] = []
         self._steering_queue: asyncio.Queue[str] = asyncio.Queue()
         self._router = ModelRouter(config)
