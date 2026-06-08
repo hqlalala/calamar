@@ -137,6 +137,7 @@ calamar/
 ├── middleware.py     # MiddlewarePipeline
 ├── router.py        # ModelRouter
 ├── roles.py         # AgentRole
+├── orchestrator.py  # 多代理编排器
 ├── tools/           # 工具系统
 │   ├── base.py      # Tool 协议 + ToolResult
 │   ├── registry.py  # 工具注册和分发
@@ -191,7 +192,7 @@ calamar/
 
 ### v0.5 — 多 Agent
 
-- [ ] 三代理协作（Planner → Executor → Verifier）
+- [x] 三代理协作（Planner → Executor → Verifier）
 - [ ] Subagent 委托 + 并行扇出
 
 ### v1.0 — 生产就绪
