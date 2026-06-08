@@ -172,9 +172,9 @@ calamar/
 
 ### v0.2 — 可交互的 Agent
 
-- [ ] 内置工具：terminal、file_read、file_edit、file_write、search
-- [ ] CLI 交互式 REPL
-- [ ] 流式终端输出（rich/prompt_toolkit）
+- [x] 内置工具：terminal、file_read、file_edit、file_write、search
+- [x] CLI 交互式 REPL
+- [x] 流式终端输出（rich/prompt_toolkit）
 - [ ] 端到端真实 API 调用
 
 ### v0.3 — 代码理解
