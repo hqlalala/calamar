@@ -19,10 +19,7 @@ class ModelRouter:
         self._config = config
 
     def classify(self, user_message: str, has_code_context: bool = False) -> TaskProfile:
-        msg_len = len(user_message)
-
-        if msg_len < 100 and not has_code_context:
-            return TaskProfile(complexity="simple", task_type="qa")
+        lower = user_message.lower()
 
         keywords_complex = [
             "refactor", "implement", "build", "create", "design",
@@ -31,7 +28,6 @@ class ModelRouter:
         keywords_fix = ["fix", "bug", "error", "broken", "修复", "报错", "异常"]
         keywords_review = ["review", "check", "审查", "检查"]
 
-        lower = user_message.lower()
         if any(k in lower for k in keywords_complex):
             return TaskProfile(complexity="complex", task_type="code_edit")
         if any(k in lower for k in keywords_fix):
@@ -40,6 +36,8 @@ class ModelRouter:
             return TaskProfile(complexity="medium", task_type="code_review")
         if has_code_context:
             return TaskProfile(complexity="medium", task_type="code_edit")
+        if len(user_message) < 100:
+            return TaskProfile(complexity="simple", task_type="qa")
 
         return TaskProfile(complexity="medium", task_type="general")
 

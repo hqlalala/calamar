@@ -6,18 +6,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Event:
     type: str
 
 
-@dataclass
+@dataclass(kw_only=True)
 class TextEvent(Event):
     text: str
     type: str = "text"
 
 
-@dataclass
+@dataclass(kw_only=True)
 class ToolEvent(Event):
     tool_name: str
     tool_args: dict[str, Any]
