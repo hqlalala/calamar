@@ -59,7 +59,7 @@ class GitWorkflow:
         code, porcelain = await self._run("git", "status", "--porcelain")
         if code == 0 and porcelain.strip():
             result.has_changes = True
-            for line in porcelain.strip().split("\n"):
+            for line in porcelain.rstrip("\n").split("\n"):
                 if not line or len(line) < 4:
                     continue
                 status = line[:2]
