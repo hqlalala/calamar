@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from collections.abc import AsyncIterator
 
@@ -85,6 +86,8 @@ class AgentLoop:
         )
 
         self._inject_repo_map(config.project_root or ".")
+        self._inject_project_config(config.project_root or ".")
+        self._inject_environment(config.project_root or ".")
 
         self._git = GitWorkflow(config.project_root or ".")
 
@@ -263,6 +266,42 @@ class AgentLoop:
         except Exception:
             # Repo map is best-effort; failures here must not block agent startup.
             pass
+
+    _PROJECT_CONFIG_FILES = ("AGENT.md", ".calamar.md", "CLAUDE.md")
+
+    def _inject_project_config(self, project_root: str) -> None:
+        for name in self._PROJECT_CONFIG_FILES:
+            path = os.path.join(project_root, name)
+            try:
+                with open(path) as f:
+                    content = f.read()
+                if content.strip():
+                    self._context_builder.add_context_file(
+                        f"# Project Instructions ({name})\n\n{content}"
+                    )
+                return
+            except OSError:
+                continue
+
+    def _inject_environment(self, project_root: str) -> None:
+        parts = [f"Working directory: {os.path.abspath(project_root)}"]
+        try:
+            import subprocess
+
+            branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=project_root,
+                timeout=5,
+            )
+            if branch.returncode == 0:
+                parts.append(f"Git branch: {branch.stdout.strip()}")
+        except Exception:
+            pass
+        self._context_builder.add_context_file(
+            "# Environment\n\n" + "\n".join(parts)
+        )
 
     def _summarize_turn(self, user_input: str, tool_calls: int) -> str:
         truncated = user_input[:80].replace("\n", " ").strip()
