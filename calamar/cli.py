@@ -13,6 +13,15 @@ from calamar.loop import AgentLoop
 from calamar.render import TerminalRenderer
 from calamar.tools.defaults import create_default_registry
 
+try:
+    from calamar.tools.mcp import McpManager
+except ImportError:
+    from contextlib import asynccontextmanager as _acm
+
+    @_acm
+    async def McpManager(*_a, **_kw):  # type: ignore[misc]
+        yield type("_Stub", (), {"server_count": 0, "tool_count": 0})()
+
 BANNER = """\
 [bold]calamar[/bold] [dim]v0.2[/dim]
 [dim]Type your message, or /help for commands. Ctrl+C to interrupt, Ctrl+D to exit.[/dim]
@@ -68,10 +77,10 @@ def _build_config(args: argparse.Namespace) -> Config:
 async def _run_once(prompt: str, config: Config, verbose: bool) -> None:
     renderer = TerminalRenderer(verbose=verbose)
     tools = create_default_registry(working_dir=config.project_root or ".")
-    agent = AgentLoop(config, tools=tools)
-
-    async for event in agent.run(prompt):
-        renderer.render(event)
+    async with McpManager(tools, config.project_root or "."):
+        agent = AgentLoop(config, tools=tools)
+        async for event in agent.run(prompt):
+            renderer.render(event)
 
 
 async def _run_repl(config: Config, verbose: bool) -> None:
@@ -90,93 +99,99 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
     renderer = TerminalRenderer(verbose=verbose)
     tools = create_default_registry(working_dir=config.project_root or ".")
-    agent = AgentLoop(config, tools=tools)
-    total_cost = 0.0
+    async with McpManager(tools, config.project_root or ".") as mcp:
+        if mcp.server_count > 0:
+            con.print(
+                f"[dim]MCP: {mcp.server_count} server(s), "
+                f"{mcp.tool_count} tool(s)[/dim]"
+            )
+        agent = AgentLoop(config, tools=tools)
+        total_cost = 0.0
 
-    while True:
-        try:
-            con.print()
-            user_input = await session.prompt_async("> ")
-        except (EOFError, KeyboardInterrupt):
-            con.print("\n[dim]Goodbye.[/dim]")
-            break
-
-        user_input = user_input.strip()
-        if not user_input:
-            continue
-
-        if user_input.startswith("/"):
-            cmd = user_input.lower()
-            if cmd in ("/exit", "/quit", "/q"):
-                con.print("[dim]Goodbye.[/dim]")
+        while True:
+            try:
+                con.print()
+                user_input = await session.prompt_async("> ")
+            except (EOFError, KeyboardInterrupt):
+                con.print("\n[dim]Goodbye.[/dim]")
                 break
-            elif cmd == "/help":
-                con.print(HELP_TEXT)
-                continue
-            elif cmd == "/clear":
-                agent.clear_history()
-                con.print("[dim]History cleared.[/dim]")
-                continue
-            elif cmd == "/model" or cmd.startswith("/model "):
-                parts = user_input.strip().split(maxsplit=1)
-                if len(parts) == 1:
-                    con.print(f"[dim]Current model: {config.model}[/dim]")
-                elif parts[1].lower() == "list":
-                    con.print("[dim]Fetching models...[/dim]")
-                    models = await agent.provider.list_models()
-                    if models:
-                        for m in models:
-                            marker = " *" if m == config.model else ""
-                            con.print(f"[dim]  {m}{marker}[/dim]")
-                    else:
-                        con.print("[dim]Could not fetch model list.[/dim]")
-                else:
-                    config.model = parts[1]
-                    con.print(f"[dim]Switched to: {config.model}[/dim]")
-                continue
-            elif cmd == "/cost":
-                con.print(f"[dim]Session cost: ${total_cost:.4f}[/dim]")
-                continue
-            elif cmd == "/verbose":
-                verbose = not verbose
-                renderer = TerminalRenderer(verbose=verbose)
-                state = "on" if verbose else "off"
-                con.print(f"[dim]Verbose mode: {state}[/dim]")
-                continue
-            elif cmd in ("/undo", "/undo --all"):
-                if cmd == "/undo --all":
-                    reverted = await agent.git.undo_all()
-                    if reverted:
-                        names = ", ".join(r.sha for r in reverted)
-                        con.print(f"[dim]Reverted {len(reverted)} commits: {names}[/dim]")
-                    else:
-                        con.print("[dim]No agent commits to undo.[/dim]")
-                else:
-                    reverted = await agent.git.undo_last()
-                    if reverted:
-                        con.print(f"[dim]Reverted {reverted.sha}: {reverted.message}[/dim]")
-                    else:
-                        con.print("[dim]No agent commits to undo.[/dim]")
-                continue
-            elif cmd == "/diff":
-                diff_text = await agent.git.diff()
-                if diff_text:
-                    con.print(diff_text)
-                else:
-                    con.print("[dim]No uncommitted changes.[/dim]")
-                continue
-            elif cmd == "/branch":
-                branch = await agent.git.current_branch()
-                con.print(f"[dim]Branch: {branch or '(detached)'}[/dim]")
+
+            user_input = user_input.strip()
+            if not user_input:
                 continue
 
-        try:
-            async for event in agent.run(user_input):
-                renderer.render(event)
-                if hasattr(event, "cost_usd"):
-                    total_cost += event.cost_usd
-        except KeyboardInterrupt:
-            con.print("\n[dim]Interrupted.[/dim]")
+            if user_input.startswith("/"):
+                cmd = user_input.lower()
+                if cmd in ("/exit", "/quit", "/q"):
+                    con.print("[dim]Goodbye.[/dim]")
+                    break
+                elif cmd == "/help":
+                    con.print(HELP_TEXT)
+                    continue
+                elif cmd == "/clear":
+                    agent.clear_history()
+                    con.print("[dim]History cleared.[/dim]")
+                    continue
+                elif cmd == "/model" or cmd.startswith("/model "):
+                    parts = user_input.strip().split(maxsplit=1)
+                    if len(parts) == 1:
+                        con.print(f"[dim]Current model: {config.model}[/dim]")
+                    elif parts[1].lower() == "list":
+                        con.print("[dim]Fetching models...[/dim]")
+                        models = await agent.provider.list_models()
+                        if models:
+                            for m in models:
+                                marker = " *" if m == config.model else ""
+                                con.print(f"[dim]  {m}{marker}[/dim]")
+                        else:
+                            con.print("[dim]Could not fetch model list.[/dim]")
+                    else:
+                        config.model = parts[1]
+                        con.print(f"[dim]Switched to: {config.model}[/dim]")
+                    continue
+                elif cmd == "/cost":
+                    con.print(f"[dim]Session cost: ${total_cost:.4f}[/dim]")
+                    continue
+                elif cmd == "/verbose":
+                    verbose = not verbose
+                    renderer = TerminalRenderer(verbose=verbose)
+                    state = "on" if verbose else "off"
+                    con.print(f"[dim]Verbose mode: {state}[/dim]")
+                    continue
+                elif cmd in ("/undo", "/undo --all"):
+                    if cmd == "/undo --all":
+                        reverted = await agent.git.undo_all()
+                        if reverted:
+                            names = ", ".join(r.sha for r in reverted)
+                            con.print(f"[dim]Reverted {len(reverted)} commits: {names}[/dim]")
+                        else:
+                            con.print("[dim]No agent commits to undo.[/dim]")
+                    else:
+                        reverted = await agent.git.undo_last()
+                        if reverted:
+                            con.print(f"[dim]Reverted {reverted.sha}: {reverted.message}[/dim]")
+                        else:
+                            con.print("[dim]No agent commits to undo.[/dim]")
+                    continue
+                elif cmd == "/diff":
+                    diff_text = await agent.git.diff()
+                    if diff_text:
+                        con.print(diff_text)
+                    else:
+                        con.print("[dim]No uncommitted changes.[/dim]")
+                    continue
+                elif cmd == "/branch":
+                    branch = await agent.git.current_branch()
+                    con.print(f"[dim]Branch: {branch or '(detached)'}[/dim]")
+                    continue
+
+            try:
+                async for event in agent.run(user_input):
+                    renderer.render(event)
+                    if hasattr(event, "cost_usd"):
+                        total_cost += event.cost_usd
+            except KeyboardInterrupt:
+                con.print("\n[dim]Interrupted.[/dim]")
 
 
 def main() -> None:

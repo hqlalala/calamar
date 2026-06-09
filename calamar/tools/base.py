@@ -46,6 +46,30 @@ class ToolSpec:
 
 
 @dataclass
+class RawToolSpec(ToolSpec):
+    """ToolSpec backed by a raw JSON Schema dict for parameters.
+
+    Used by MCP tools whose inputSchema is richer than ToolParameter
+    can represent (nested objects, arrays, enums, etc.).
+    """
+
+    raw_parameters: dict[str, Any] = field(default_factory=dict)
+
+    def to_openai_schema(self) -> dict[str, Any]:
+        params = self.raw_parameters or {
+            "type": "object", "properties": {},
+        }
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": params,
+            },
+        }
+
+
+@dataclass
 class ToolResult:
     output: str = ""
     error: str | None = None
