@@ -291,6 +291,102 @@ class TestPermissionMiddleware:
         assert result.blocked
 
 
+class TestPermissionModes:
+    def test_auto_mode_skips_dangerous(self):
+        import asyncio
+        called = []
+
+        async def callback(name, args):
+            called.append(True)
+            return False
+
+        perm = PermissionMiddleware(callback, mode="auto")
+        ctx = MiddlewareContext(
+            tool_name="terminal",
+            tool_args={"command": "rm -rf /"},
+        )
+
+        async def noop(c):
+            return c
+
+        result = asyncio.run(perm.process(ctx, noop))
+        assert not result.blocked
+        assert len(called) == 0
+
+    def test_strict_mode_blocks_all_terminal(self):
+        import asyncio
+
+        async def deny(name, args):
+            return False
+
+        perm = PermissionMiddleware(deny, mode="strict")
+        ctx = MiddlewareContext(
+            tool_name="terminal",
+            tool_args={"command": "ls -la"},
+        )
+
+        async def noop(c):
+            return c
+
+        result = asyncio.run(perm.process(ctx, noop))
+        assert result.blocked
+
+    def test_strict_mode_blocks_file_edit(self):
+        import asyncio
+
+        async def deny(name, args):
+            return False
+
+        perm = PermissionMiddleware(deny, mode="strict")
+        ctx = MiddlewareContext(
+            tool_name="file_edit",
+            tool_args={"path": "/app/main.py"},
+        )
+
+        async def noop(c):
+            return c
+
+        result = asyncio.run(perm.process(ctx, noop))
+        assert result.blocked
+
+    def test_strict_mode_allows_read(self):
+        import asyncio
+        called = []
+
+        async def callback(name, args):
+            called.append(True)
+            return True
+
+        perm = PermissionMiddleware(callback, mode="strict")
+        ctx = MiddlewareContext(
+            tool_name="file_read",
+            tool_args={"path": "/app/main.py"},
+        )
+
+        async def noop(c):
+            return c
+
+        result = asyncio.run(perm.process(ctx, noop))
+        assert not result.blocked
+        assert len(called) == 0
+
+    def test_mode_setter_validates(self):
+        async def noop(name, args):
+            return True
+
+        perm = PermissionMiddleware(noop)
+        assert perm.mode == "normal"
+
+        perm.mode = "strict"
+        assert perm.mode == "strict"
+
+        perm.mode = "auto"
+        assert perm.mode == "auto"
+
+        with pytest.raises(ValueError):
+            perm.mode = "invalid"
+
+
 class TestUndoLastTurn:
     def test_undo_removes_last_turn(self):
         from calamar.context import assistant_message

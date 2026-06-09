@@ -76,9 +76,13 @@ class AgentLoop:
         self._provider = create_provider(config)
 
         self._cost = CostMiddleware(config.budget.daily_limit_usd)
+        self._permission: PermissionMiddleware | None = None
         self._pipeline = MiddlewarePipeline()
         if permission_callback:
-            self._pipeline.use(PermissionMiddleware(permission_callback))
+            self._permission = PermissionMiddleware(
+                permission_callback, mode=config.permission.mode,
+            )
+            self._pipeline.use(self._permission)
         self._pipeline.use(InputGuardrail())
         self._pipeline.use(self._cost)
         self._pipeline.use(TimingMiddleware())

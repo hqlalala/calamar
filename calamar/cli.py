@@ -45,6 +45,7 @@ HELP_TEXT = """
   /config        Show current configuration
   /verbose       Toggle verbose mode
   /plan          Toggle plan mode (Planner→Executor→Verifier)
+  /permission    Show or set permission mode (auto/normal/strict)
   /sessions      List recent sessions
   /resume [id]   Resume a previous session
   /undo          Undo last agent change
@@ -189,7 +190,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
         _COMMANDS = (
             "/help", "/clear", "/retry", "/compact", "/context",
             "/model", "/model list", "/cost", "/config", "/verbose",
-            "/plan", "/sessions", "/resume",
+            "/plan", "/permission", "/sessions", "/resume",
             "/undo", "/diff", "/branch", "/init", "/exit",
         )
 
@@ -328,6 +329,23 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                             "[dim]  Agent will plan before editing "
                             "(Planner → Executor → Verifier)[/dim]"
                         )
+                    continue
+                elif cmd == "/permission" or cmd.startswith("/permission "):
+                    parts = user_input.strip().split(maxsplit=1)
+                    perm = agent._permission
+                    if perm is None:
+                        con.print("[dim]Permission middleware not active.[/dim]")
+                    elif len(parts) == 1:
+                        con.print(f"[dim]Permission mode: {perm.mode}[/dim]")
+                        con.print("[dim]  auto   — never ask[/dim]")
+                        con.print("[dim]  normal — ask for dangerous ops[/dim]")
+                        con.print("[dim]  strict — ask for all mutations[/dim]")
+                    else:
+                        try:
+                            perm.mode = parts[1].strip().lower()
+                            con.print(f"[dim]Permission mode: {perm.mode}[/dim]")
+                        except ValueError:
+                            con.print("[dim]Invalid mode. Use: auto, normal, strict[/dim]")
                     continue
                 elif cmd == "/sessions":
                     import time as _time

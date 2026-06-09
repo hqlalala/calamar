@@ -99,7 +99,13 @@ class InputGuardrail:
 
 
 class PermissionMiddleware:
-    """Ask user confirmation before executing dangerous operations."""
+    """Ask user confirmation before executing dangerous operations.
+
+    Modes:
+      - auto: never ask, run everything
+      - normal: ask for dangerous commands and sensitive file writes
+      - strict: ask for all terminal commands and all file mutations
+    """
 
     _DANGEROUS_PREFIXES = (
         "rm ", "rm\t", "rmdir ", "git push", "git reset", "git rebase",
@@ -112,8 +118,23 @@ class PermissionMiddleware:
         ".ssh/", ".aws/", "token", "password",
     )
 
-    def __init__(self, callback: PermissionCallback) -> None:
+    _MUTATING_TOOLS = ("terminal", "file_write", "file_edit")
+
+    def __init__(
+        self, callback: PermissionCallback, mode: str = "normal",
+    ) -> None:
         self._callback = callback
+        self._mode = mode
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @mode.setter
+    def mode(self, value: str) -> None:
+        if value not in ("auto", "normal", "strict"):
+            raise ValueError(f"Invalid permission mode: {value}")
+        self._mode = value
 
     async def process(
         self, ctx: MiddlewareContext, call_next: Any,
@@ -126,6 +147,13 @@ class PermissionMiddleware:
         return await call_next(ctx)
 
     def _needs_permission(self, ctx: MiddlewareContext) -> bool:
+        if self._mode == "auto":
+            return False
+
+        if self._mode == "strict":
+            return ctx.tool_name in self._MUTATING_TOOLS
+
+        # normal mode
         if ctx.tool_name == "terminal":
             cmd = ctx.tool_args.get("command", "").strip()
             for prefix in self._DANGEROUS_PREFIXES:
