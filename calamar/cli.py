@@ -34,6 +34,8 @@ HELP_TEXT = """
   /help          Show this help
   /clear         Clear conversation history
   /retry         Retry last message
+  /compact       Compact context to free tokens
+  /context       Show context usage
   /model         Show current model
   /model list    List available models
   /model <name>  Switch model
@@ -281,6 +283,20 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     renderer = TerminalRenderer(verbose=verbose)
                     state = "on" if verbose else "off"
                     con.print(f"[dim]Verbose mode: {state}[/dim]")
+                    continue
+                elif cmd == "/compact":
+                    removed = await agent.compact()
+                    if removed > 0:
+                        con.print(f"[dim]Compacted: removed {removed} messages.[/dim]")
+                    else:
+                        con.print("[dim]Nothing to compact.[/dim]")
+                    continue
+                elif cmd == "/context":
+                    info = agent.context_info()
+                    pct = info["tokens_est"] * 100 // max(info["context_window"], 1)
+                    con.print(f"[dim]  Messages:  {info['messages']}[/dim]")
+                    con.print(f"[dim]  Tokens:    ~{info['tokens_est']:,} / {info['context_window']:,} ({pct}%)[/dim]")
+                    con.print(f"[dim]  Tools:     {info['tools']}[/dim]")
                     continue
                 elif cmd in ("/undo", "/undo --all"):
                     if cmd == "/undo --all":

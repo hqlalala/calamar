@@ -130,6 +130,24 @@ class AgentLoop:
                 self._history = self._history[:i]
                 return
 
+    def context_info(self) -> dict[str, int]:
+        """Return context usage stats."""
+        token_est = sum(len(m.content) // 3 for m in self._history)
+        return {
+            "messages": len(self._history),
+            "tokens_est": token_est,
+            "context_window": self._config.context_window,
+            "tools": len(self._tools.to_openai_tools()),
+        }
+
+    async def compact(self) -> int:
+        """Manually trigger context compaction. Returns messages removed."""
+        before = len(self._history)
+        self._history = await self._compactor.compact(
+            self._history, summarizer=self._summarize_context,
+        )
+        return before - len(self._history)
+
     def inject_steering(self, instruction: str) -> None:
         self._steering_queue.put_nowait(instruction)
 
