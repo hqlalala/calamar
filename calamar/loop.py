@@ -7,6 +7,7 @@ import json
 import os
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from calamar.config import Config
 from calamar.context import (
@@ -34,7 +35,7 @@ from calamar.middleware import (
     OutputGuardrail,
     TimingMiddleware,
 )
-from calamar.providers import create_provider
+from calamar.providers import StreamDelta, create_provider
 from calamar.roles import DEFAULT, AgentRole
 from calamar.router import ModelRouter
 from calamar.tools.defaults import create_default_registry
@@ -123,6 +124,9 @@ class AgentLoop:
         self._steering_queue.put_nowait(instruction)
 
     _FILE_TOOLS = {"file_write", "file_edit", "terminal"}
+    _MAX_RETRIES = 3
+    _RETRY_BASE_DELAY = 1.0
+    _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
 
     async def run(self, user_input: str) -> AsyncIterator[Event]:
         turn_id = uuid.uuid4().hex[:12]
@@ -134,6 +138,7 @@ class AgentLoop:
         total_tokens = 0
         total_cost = 0.0
         has_file_changes = False
+        interrupted = False
 
         for _iteration in range(self._config.max_turns):
             self._drain_steering()
@@ -147,12 +152,10 @@ class AgentLoop:
                 tool_calls = []
                 finish_reason = "stop"
 
-                async for delta in self._provider.stream(
+                async for delta in self._stream_with_retry(
                     model=model,
                     messages=messages,
                     tools=tools_schema,
-                    temperature=self._config.temperature,
-                    max_tokens=self._config.max_tokens,
                 ):
                     if delta.text:
                         accumulated_text += delta.text
@@ -164,6 +167,10 @@ class AgentLoop:
                     if delta.usage:
                         total_tokens += delta.usage.total_tokens
                         total_cost += delta.usage.cost_usd
+            except KeyboardInterrupt:
+                interrupted = True
+                yield ErrorEvent(error="Interrupted by user", recoverable=True)
+                break
             except Exception as e:
                 yield ErrorEvent(error=str(e), recoverable=False)
                 break
@@ -241,6 +248,41 @@ class AgentLoop:
         if self._role.model_override:
             return self._role.model_override
         return self._router.route(user_input, has_code_context=bool(self._history))
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+        if status and int(status) in AgentLoop._RETRYABLE_STATUS_CODES:
+            return True
+        name = type(exc).__name__.lower()
+        return any(k in name for k in ("timeout", "connection", "ratelimit"))
+
+    async def _stream_with_retry(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> AsyncIterator[StreamDelta]:
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                async for delta in self._provider.stream(
+                    model=model,
+                    messages=messages,
+                    tools=tools,
+                    temperature=self._config.temperature,
+                    max_tokens=self._config.max_tokens,
+                ):
+                    yield delta
+                return
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if not self._is_retryable(exc) or attempt == self._MAX_RETRIES - 1:
+                    raise
+                delay = self._RETRY_BASE_DELAY * (2 ** attempt)
+                await asyncio.sleep(delay)
 
     def _drain_steering(self) -> None:
         while not self._steering_queue.empty():
