@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import sys
-import unicodedata
 
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
@@ -21,18 +21,13 @@ from calamar.events import (
 )
 
 
-def _display_width(s: str) -> int:
-    """Terminal display width, accounting for CJK double-width characters."""
-    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in s)
-
-
 class TerminalRenderer:
     def __init__(self, verbose: bool = False) -> None:
         self._verbose = verbose
         self._console = Console()
         self._streaming = False
         self._stream_buffer = ""
-        self._stream_lines = 0
+        self._live: Live | None = None
         self._thinking = False
 
     def render(self, event: Event) -> None:
@@ -45,10 +40,7 @@ class TerminalRenderer:
         match event:
             case TextEvent(text=text, streaming=streaming):
                 if streaming:
-                    sys.stdout.write(text)
-                    sys.stdout.flush()
-                    self._stream_buffer += text
-                    self._streaming = True
+                    self._stream_chunk(text)
                 else:
                     self._render_text(text)
             case ToolEvent():
@@ -84,30 +76,27 @@ class TerminalRenderer:
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
+    def _stream_chunk(self, text: str) -> None:
+        """Append a streaming chunk and update the live markdown display."""
+        self._stream_buffer += text
+        if not self._streaming:
+            self._streaming = True
+            self._live = Live(
+                Markdown(self._stream_buffer),
+                console=self._console,
+                refresh_per_second=15,
+            )
+            self._live.start()
+        else:
+            self._live.update(Markdown(self._stream_buffer))
+
     def _finalize_stream(self) -> None:
-        """Replace raw streamed text with markdown-rendered version."""
-        text = self._stream_buffer.strip()
+        """Stop the live display — rendered markdown stays on screen."""
+        if self._live is not None:
+            self._live.stop()
+            self._live = None
         self._streaming = False
         self._stream_buffer = ""
-
-        if not text:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-            return
-
-        width = self._console.width or 80
-        visual_lines = 0
-        for line in text.split("\n"):
-            line_w = _display_width(line)
-            visual_lines += max(1, (line_w + width - 1) // width)
-        visual_lines += 1
-
-        for _ in range(visual_lines):
-            sys.stdout.write("\033[2K\033[A")
-        sys.stdout.write("\033[2K\r")
-        sys.stdout.flush()
-
-        self._render_text(text)
 
     def _render_text(self, text: str) -> None:
         try:
