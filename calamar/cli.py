@@ -14,6 +14,7 @@ from calamar.events import ErrorEvent, TextEvent, ToolEvent
 from calamar.loop import AgentLoop
 from calamar.orchestrator import Orchestrator, OrchestratorConfig
 from calamar.render import TerminalRenderer
+from calamar.session import SessionManager
 from calamar.tools.defaults import create_default_registry
 
 try:
@@ -44,6 +45,8 @@ HELP_TEXT = """
   /config        Show current configuration
   /verbose       Toggle verbose mode
   /plan          Toggle plan mode (Planner→Executor→Verifier)
+  /sessions      List recent sessions
+  /resume [id]   Resume a previous session
   /undo          Undo last agent change
   /diff          Show uncommitted changes
   /branch        Show current branch
@@ -186,7 +189,8 @@ async def _run_repl(config: Config, verbose: bool) -> None:
         _COMMANDS = (
             "/help", "/clear", "/retry", "/compact", "/context",
             "/model", "/model list", "/cost", "/config", "/verbose",
-            "/plan", "/undo", "/diff", "/branch", "/init", "/exit",
+            "/plan", "/sessions", "/resume",
+            "/undo", "/diff", "/branch", "/init", "/exit",
         )
 
         def get_completions(self, document, complete_event):
@@ -233,15 +237,20 @@ async def _run_repl(config: Config, verbose: bool) -> None:
         agent = AgentLoop(config, tools=tools, permission_callback=_ask_permission)
         orch_config = OrchestratorConfig(force_plan=False)
         orchestrator = Orchestrator(agent, orch_config)
+        sess_mgr = SessionManager(model=config.model)
         plan_mode = False
         total_cost = 0.0
         last_user_input = ""
+
+        con.print(f"[dim]Session: {sess_mgr.session_id}[/dim]")
 
         while True:
             try:
                 con.print()
                 user_input = await session.prompt_async("> ")
             except (EOFError, KeyboardInterrupt):
+                if agent.history:
+                    sess_mgr.save(agent.history)
                 con.print("\n[dim]Goodbye.[/dim]")
                 break
 
@@ -252,6 +261,8 @@ async def _run_repl(config: Config, verbose: bool) -> None:
             if user_input.startswith("/"):
                 cmd = user_input.lower()
                 if cmd in ("/exit", "/quit", "/q"):
+                    if agent.history:
+                        sess_mgr.save(agent.history)
                     con.print("[dim]Goodbye.[/dim]")
                     break
                 elif cmd == "/help":
@@ -318,6 +329,48 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                             "(Planner → Executor → Verifier)[/dim]"
                         )
                     continue
+                elif cmd == "/sessions":
+                    import time as _time
+                    sessions = SessionManager.list_sessions()
+                    if not sessions:
+                        con.print("[dim]No saved sessions.[/dim]")
+                    else:
+                        for s in sessions:
+                            ts = _time.strftime("%m-%d %H:%M", _time.localtime(s.updated_at))
+                            summary = s.summary[:60] or "(empty)"
+                            con.print(
+                                f"[dim]  {s.session_id}  {ts}  "
+                                f"{s.message_count}msg  {summary}[/dim]"
+                            )
+                    continue
+                elif cmd == "/resume" or cmd.startswith("/resume "):
+                    parts = user_input.strip().split(maxsplit=1)
+                    if len(parts) == 1:
+                        sessions = SessionManager.list_sessions(limit=5)
+                        if not sessions:
+                            con.print("[dim]No saved sessions.[/dim]")
+                        else:
+                            con.print("[dim]Recent sessions (use /resume <id>):[/dim]")
+                            import time as _time
+                            for s in sessions:
+                                ts = _time.strftime("%m-%d %H:%M", _time.localtime(s.updated_at))
+                                summary = s.summary[:50] or "(empty)"
+                                con.print(
+                                    f"[dim]  {s.session_id}  {ts}  {summary}[/dim]"
+                                )
+                    else:
+                        sid = parts[1].strip()
+                        try:
+                            messages = sess_mgr.load(sid)
+                            agent._history = messages
+                            last_user_input = ""
+                            con.print(
+                                f"[dim]Resumed session {sid} "
+                                f"({len(messages)} messages)[/dim]"
+                            )
+                        except (OSError, KeyError) as exc:
+                            con.print(f"[dim]Could not load session: {exc}[/dim]")
+                    continue
                 elif cmd == "/compact":
                     removed = await agent.compact()
                     if removed > 0:
@@ -369,6 +422,8 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     renderer.render(event)
                     if hasattr(event, "cost_usd"):
                         total_cost += event.cost_usd
+                if agent.history:
+                    sess_mgr.save(agent.history)
             except KeyboardInterrupt:
                 renderer.flush()
                 con.print("\n[dim]Interrupted.[/dim]")
