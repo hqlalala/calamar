@@ -43,8 +43,15 @@ HELP_TEXT = """
 """
 
 
+def _infer_provider(model: str) -> str:
+    """Auto-detect provider from model name."""
+    if model.startswith("claude-"):
+        return "anthropic"
+    return "openai"
+
+
 def _build_config(args: argparse.Namespace) -> Config:
-    provider = args.provider or os.environ.get("CALAMAR_PROVIDER", "openai")
+    provider = args.provider or os.environ.get("CALAMAR_PROVIDER", "")
 
     if provider == "ducky":
         ducky_token = args.api_key or os.environ.get("AONE_TOKEN", "")
@@ -59,10 +66,21 @@ def _build_config(args: argparse.Namespace) -> Config:
             project_root=os.getcwd(),
         )
 
-    api_key = args.api_key or os.environ.get(
-        "OPENAI_API_KEY",
-        os.environ.get("ANTHROPIC_API_KEY", ""),
-    )
+    if not provider:
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key or args.model.startswith("claude-"):
+            provider = "anthropic"
+        else:
+            provider = _infer_provider(args.model)
+
+    if provider == "anthropic":
+        api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    else:
+        api_key = args.api_key or os.environ.get(
+            "OPENAI_API_KEY",
+            os.environ.get("ANTHROPIC_API_KEY", ""),
+        )
+
     base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
 
     return Config(

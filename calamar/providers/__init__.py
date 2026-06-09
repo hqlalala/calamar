@@ -72,6 +72,11 @@ def create_provider(config: Any) -> Provider:
 
         return DuckyProvider(config)
 
+    if provider == "anthropic":
+        from calamar.providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider(config)
+
     from calamar.providers.openai_provider import OpenAIProvider
 
     return OpenAIProvider(config)
