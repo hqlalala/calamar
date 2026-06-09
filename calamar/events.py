@@ -14,6 +14,7 @@ class Event:
 @dataclass(kw_only=True)
 class TextEvent(Event):
     text: str
+    streaming: bool = False
     type: str = "text"
 
 

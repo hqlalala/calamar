@@ -136,24 +136,33 @@ class AgentLoop:
             tools_schema = self._context_builder.tool_schemas or None
 
             try:
-                result = await self._provider.complete(
+                accumulated_text = ""
+                tool_calls = []
+                finish_reason = "stop"
+
+                async for delta in self._provider.stream(
                     model=model,
                     messages=messages,
                     tools=tools_schema,
                     temperature=self._config.temperature,
                     max_tokens=self._config.max_tokens,
-                )
+                ):
+                    if delta.text:
+                        accumulated_text += delta.text
+                        yield TextEvent(text=delta.text, streaming=True)
+                    if delta.tool_calls:
+                        tool_calls = delta.tool_calls
+                    if delta.finish_reason:
+                        finish_reason = delta.finish_reason
+                    if delta.usage:
+                        total_tokens += delta.usage.total_tokens
+                        total_cost += delta.usage.cost_usd
             except Exception as e:
                 yield ErrorEvent(error=str(e), recoverable=False)
                 break
 
-            total_tokens += result.usage.total_tokens
-            total_cost += result.usage.cost_usd
-
-            if result.finish_reason == "stop" or not result.tool_calls:
-                self._history.append(assistant_message(result.text))
-                if result.text:
-                    yield TextEvent(text=result.text)
+            if finish_reason == "stop" or not tool_calls:
+                self._history.append(assistant_message(accumulated_text))
                 break
 
             tool_calls_raw = [
@@ -165,16 +174,16 @@ class AgentLoop:
                         "arguments": json.dumps(tc.arguments),
                     },
                 }
-                for tc in result.tool_calls
+                for tc in tool_calls
             ]
 
             self._history.append(Message(
                 role="assistant",
-                content=result.text,
+                content=accumulated_text,
                 tool_calls=tool_calls_raw,
             ))
 
-            for tc in result.tool_calls:
+            for tc in tool_calls:
                 name = tc.name
                 args = tc.arguments
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -29,6 +30,16 @@ class CompletionResponse:
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 
+@dataclass
+class StreamDelta:
+    """A single chunk from a streaming LLM response."""
+
+    text: str = ""
+    tool_calls: list[ToolCallData] | None = None
+    finish_reason: str | None = None
+    usage: TokenUsage | None = None
+
+
 class Provider(Protocol):
     """Interface that all LLM providers must satisfy."""
 
@@ -40,6 +51,15 @@ class Provider(Protocol):
         temperature: float = 0.0,
         max_tokens: int = 8192,
     ) -> CompletionResponse: ...
+
+    def stream(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 8192,
+    ) -> AsyncIterator[StreamDelta]: ...
 
 
 def create_provider(config: Any) -> Provider:
@@ -62,6 +82,7 @@ def make_tool_call_id() -> str:
 __all__ = [
     "CompletionResponse",
     "Provider",
+    "StreamDelta",
     "ToolCallData",
     "create_provider",
     "make_tool_call_id",

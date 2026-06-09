@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -22,11 +24,22 @@ class TerminalRenderer:
     def __init__(self, verbose: bool = False) -> None:
         self._verbose = verbose
         self._console = Console()
+        self._streaming = False
 
     def render(self, event: Event) -> None:
+        if not isinstance(event, TextEvent) and self._streaming:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            self._streaming = False
+
         match event:
-            case TextEvent(text=text):
-                self._render_text(text)
+            case TextEvent(text=text, streaming=streaming):
+                if streaming:
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                    self._streaming = True
+                else:
+                    self._render_text(text)
             case ToolEvent():
                 self._render_tool(event)
             case TurnStartEvent():

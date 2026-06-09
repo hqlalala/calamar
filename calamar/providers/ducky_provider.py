@@ -7,6 +7,7 @@ import json
 import os
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,12 @@ import httpx
 
 from calamar.config import Config
 from calamar.events import TokenUsage
-from calamar.providers import CompletionResponse, ToolCallData, make_tool_call_id
+from calamar.providers import (
+    CompletionResponse,
+    StreamDelta,
+    ToolCallData,
+    make_tool_call_id,
+)
 
 _TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
@@ -49,7 +55,9 @@ class DuckyProvider:
         max_tokens: int = 8192,
     ) -> CompletionResponse:
         chat_messages = self._convert_messages(messages, tools)
-        full_text = await self._send_sse(chat_messages, model)
+        full_text = ""
+        async for delta in self._stream_sse(chat_messages, model):
+            full_text += delta
 
         tool_calls_parsed = self._parse_tool_calls(full_text)
         cleaned_text = _TOOL_CALL_RE.sub("", full_text).strip()
@@ -58,6 +66,39 @@ class DuckyProvider:
         return CompletionResponse(
             text=cleaned_text,
             tool_calls=tool_calls_parsed,
+            finish_reason=finish_reason,
+            usage=TokenUsage(model=model),
+        )
+
+    async def stream(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 8192,
+    ) -> AsyncIterator[StreamDelta]:
+        chat_messages = self._convert_messages(messages, tools)
+        full_text = ""
+        in_tool_call = False
+
+        async for delta in self._stream_sse(chat_messages, model):
+            full_text += delta
+
+            if not in_tool_call:
+                tc_start = delta.find("<tool_call>")
+                if tc_start != -1:
+                    visible = delta[:tc_start]
+                    if visible:
+                        yield StreamDelta(text=visible)
+                    in_tool_call = True
+                else:
+                    yield StreamDelta(text=delta)
+
+        tool_calls = self._parse_tool_calls(full_text)
+        finish_reason = "tool_calls" if tool_calls else "stop"
+        yield StreamDelta(
+            tool_calls=tool_calls or None,
             finish_reason=finish_reason,
             usage=TokenUsage(model=model),
         )
@@ -94,12 +135,12 @@ class DuckyProvider:
 
         return result
 
-    async def _send_sse(
+    async def _stream_sse(
         self,
         chat_messages: list[dict[str, str]],
         model: str,
-    ) -> str:
-        """Send request and consume cumulative SSE stream."""
+    ) -> AsyncIterator[str]:
+        """Yield text deltas from the Ducky SSE stream."""
         encoded_token = base64.b64encode(
             self._token.encode("utf-8")
         ).decode("utf-8")
@@ -113,8 +154,7 @@ class DuckyProvider:
         }
         body = {"chatMessage": chat_messages, "needAppend": True}
 
-        prev_content = ""
-        full_text = ""
+        prev_len = 0
         tool_call_end_tag = "</tool_call>"
 
         async with httpx.AsyncClient(
@@ -151,19 +191,15 @@ class DuckyProvider:
                         continue
 
                     content = obj.get("content")
-                    if content is None:
+                    if content is None or len(content) <= prev_len:
                         continue
 
-                    if len(content) > len(prev_content):
-                        full_text = content
-                        prev_content = content
+                    delta = content[prev_len:]
+                    prev_len = len(content)
+                    yield delta
 
-                    idx = full_text.find(tool_call_end_tag)
-                    if idx != -1:
-                        full_text = full_text[:idx + len(tool_call_end_tag)]
+                    if tool_call_end_tag in content:
                         break
-
-        return full_text
 
     def _parse_tool_calls(self, text: str) -> list[ToolCallData]:
         calls: list[ToolCallData] = []

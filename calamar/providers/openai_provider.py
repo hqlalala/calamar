@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from calamar.config import Config
 from calamar.events import TokenUsage
-from calamar.providers import CompletionResponse, ToolCallData
+from calamar.providers import CompletionResponse, StreamDelta, ToolCallData
 
 
 class OpenAIProvider:
@@ -65,6 +66,71 @@ class OpenAIProvider:
             finish_reason="tool_calls",
             usage=usage,
         )
+
+    async def stream(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int = 8192,
+    ) -> AsyncIterator[StreamDelta]:
+        response = await self._client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+        tc_id_map: dict[int, str] = {}
+        tc_name_map: dict[int, str] = {}
+        tc_args_map: dict[int, str] = {}
+        finish_reason: str | None = None
+
+        async for chunk in response:
+            if not chunk.choices:
+                usage = self._extract_usage(chunk, model)
+                if usage.total_tokens > 0:
+                    yield StreamDelta(usage=usage)
+                continue
+
+            delta = chunk.choices[0].delta
+            if chunk.choices[0].finish_reason:
+                finish_reason = chunk.choices[0].finish_reason
+
+            if delta.content:
+                yield StreamDelta(text=delta.content)
+
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if tc_delta.id:
+                        tc_id_map[idx] = tc_delta.id
+                    if tc_delta.function and tc_delta.function.name:
+                        tc_name_map[idx] = tc_delta.function.name
+                    if tc_delta.function and tc_delta.function.arguments:
+                        tc_args_map[idx] = (
+                            tc_args_map.get(idx, "") + tc_delta.function.arguments
+                        )
+
+        tool_calls = []
+        for idx in sorted(tc_id_map):
+            raw_args = tc_args_map.get(idx, "{}")
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(ToolCallData(
+                id=tc_id_map[idx],
+                name=tc_name_map.get(idx, ""),
+                arguments=args,
+            ))
+
+        fr = "tool_calls" if tool_calls else (finish_reason or "stop")
+        yield StreamDelta(tool_calls=tool_calls or None, finish_reason=fr)
 
     def _extract_usage(self, response: Any, model: str) -> TokenUsage:
         usage = response.usage
