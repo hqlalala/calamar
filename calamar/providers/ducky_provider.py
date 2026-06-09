@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -26,6 +27,8 @@ _TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
     re.DOTALL,
 )
+
+_CHUNK_TIMEOUT = 30.0
 
 JETBRAINS_BASE = Path.home() / "Library" / "Application Support" / "JetBrains"
 LINUX_JETBRAINS_BASE = Path.home() / ".config" / "JetBrains"
@@ -171,7 +174,15 @@ class DuckyProvider:
                         f"{error_body.decode('utf-8', errors='replace')[:500]}"
                     )
 
-                async for line in resp.aiter_lines():
+                line_iter = resp.aiter_lines()
+                while True:
+                    try:
+                        line = await asyncio.wait_for(
+                            anext(line_iter), timeout=_CHUNK_TIMEOUT,
+                        )
+                    except (StopAsyncIteration, TimeoutError):
+                        break
+
                     line = line.strip()
                     if not line:
                         continue
