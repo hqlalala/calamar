@@ -259,8 +259,10 @@ def _build_tools_prompt(tools: list[dict[str, Any]]) -> str:
         "",
         "RULES:",
         "- Output ONLY ONE <tool_call> per response.",
-        "- STOP writing immediately after </tool_call>.",
+        "- STOP writing immediately after </tool_call>. Do not write anything after it.",
         "- NEVER predict or write <tool_result> yourself. Wait for the actual result.",
+        "- When you need to perform an action, use a tool immediately. Do NOT describe what you plan to do — just do it.",
+        "- Keep explanations brief. Prefer action over narration.",
         "",
     ]
     for tool in tools:
