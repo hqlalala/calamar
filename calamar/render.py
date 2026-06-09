@@ -25,18 +25,19 @@ class TerminalRenderer:
         self._verbose = verbose
         self._console = Console()
         self._streaming = False
+        self._stream_buffer = ""
+        self._stream_lines = 0
 
     def render(self, event: Event) -> None:
         if not isinstance(event, TextEvent) and self._streaming:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
-            self._streaming = False
+            self._finalize_stream()
 
         match event:
             case TextEvent(text=text, streaming=streaming):
                 if streaming:
                     sys.stdout.write(text)
                     sys.stdout.flush()
+                    self._stream_buffer += text
                     self._streaming = True
                 else:
                     self._render_text(text)
@@ -56,6 +57,29 @@ class TerminalRenderer:
                     )
             case ErrorEvent(error=error):
                 self._console.print(f"[bold red]Error:[/bold red] {error}")
+
+    def _finalize_stream(self) -> None:
+        """Replace raw streamed text with markdown-rendered version."""
+        text = self._stream_buffer.strip()
+        self._streaming = False
+        self._stream_buffer = ""
+
+        if not text:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            return
+
+        width = self._console.width or 80
+        visual_lines = 0
+        for line in text.split("\n"):
+            visual_lines += max(1, (len(line) + width - 1) // width)
+
+        for _ in range(visual_lines):
+            sys.stdout.write("\033[2K\033[A")
+        sys.stdout.write("\033[2K\r")
+        sys.stdout.flush()
+
+        self._render_text(text)
 
     def _render_text(self, text: str) -> None:
         try:
