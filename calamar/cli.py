@@ -175,9 +175,25 @@ async def _run_repl(config: Config, verbose: bool) -> None:
     from pathlib import Path
 
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
     from rich.console import Console
+
+    class _CmdCompleter(Completer):
+        _COMMANDS = (
+            "/help", "/clear", "/retry", "/compact", "/context",
+            "/model", "/model list", "/cost", "/config", "/verbose",
+            "/undo", "/diff", "/branch", "/init", "/exit",
+        )
+
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor.lstrip()
+            if not text.startswith("/"):
+                return
+            for cmd in self._COMMANDS:
+                if cmd.startswith(text) and cmd != text:
+                    yield Completion(cmd, start_position=-len(text))
 
     con = Console()
     con.print(BANNER)
@@ -201,6 +217,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
         key_bindings=bindings,
         multiline=True,
         prompt_continuation="  ",
+        completer=_CmdCompleter(),
     )
 
     renderer = TerminalRenderer(verbose=verbose)
