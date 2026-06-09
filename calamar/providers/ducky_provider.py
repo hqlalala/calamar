@@ -232,11 +232,21 @@ class DuckyProvider:
                 if resp.status_code != 200:
                     return []
                 data = resp.json()
-                models = data.get("data", data.get("models", []))
-                return sorted(
-                    m.get("id", m.get("name", ""))
-                    for m in models if isinstance(m, dict)
-                )
+                if isinstance(data, dict):
+                    data = data.get("data", data.get("models", []))
+                if not isinstance(data, list):
+                    return []
+                results = []
+                for m in data:
+                    if not isinstance(m, dict):
+                        continue
+                    mid = m.get("id", "")
+                    display = m.get("display", "")
+                    if not mid:
+                        continue
+                    label = f"{mid} ({display})" if display and display != mid else mid
+                    results.append(label)
+                return sorted(results)
         except Exception:
             return []
 
