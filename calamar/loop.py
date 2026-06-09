@@ -159,7 +159,7 @@ class AgentLoop:
     def inject_steering(self, instruction: str) -> None:
         self._steering_queue.put_nowait(instruction)
 
-    _FILE_TOOLS = {"file_write", "file_edit", "terminal"}
+    _FILE_TOOLS = {"file_write", "file_edit"}
     _MAX_RETRIES = 3
     _RETRY_BASE_DELAY = 1.0
     _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
@@ -176,6 +176,7 @@ class AgentLoop:
         total_cache_read = 0
         total_cache_write = 0
         has_file_changes = False
+        changed_files: list[str] = []
         interrupted = False
 
         for _iteration in range(self._config.max_turns):
@@ -265,6 +266,9 @@ class AgentLoop:
                 tool_call_count += 1
                 if name in self._FILE_TOOLS:
                     has_file_changes = True
+                    path = args.get("path", "")
+                    if path and path not in changed_files:
+                        changed_files.append(path)
 
             if self._compactor.needs_compaction(self._history):
                 before = len(self._history)
@@ -274,8 +278,8 @@ class AgentLoop:
                 yield CompactionEvent(from_messages=before, to_messages=len(self._history))
 
         if has_file_changes and await self._git.is_repo():
-            summary = self._summarize_turn(user_input, tool_call_count)
-            await self._git.auto_commit(summary)
+            summary = self._summarize_turn(changed_files)
+            await self._git.auto_commit(summary, files=changed_files)
 
         yield TurnEndEvent(
             turn_id=turn_id,
@@ -418,8 +422,11 @@ class AgentLoop:
             "# Environment\n\n" + "\n".join(parts)
         )
 
-    def _summarize_turn(self, user_input: str, tool_calls: int) -> str:
-        truncated = user_input[:80].replace("\n", " ").strip()
-        if len(user_input) > 80:
-            truncated += "..."
-        return f"{truncated} ({tool_calls} tool calls)"
+    def _summarize_turn(self, changed_files: list[str]) -> str:
+        """Generate a commit message from the list of changed files."""
+        if not changed_files:
+            return "update files"
+        names = [f.rsplit("/", 1)[-1] for f in changed_files]
+        if len(names) <= 3:
+            return f"update {', '.join(names)}"
+        return f"update {', '.join(names[:3])} (+{len(names) - 3} more)"

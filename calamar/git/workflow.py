@@ -80,20 +80,33 @@ class GitWorkflow:
 
         return result
 
-    async def auto_commit(self, message: str) -> CommitInfo | None:
-        """Stage all changes and commit with the agent prefix.
+    async def auto_commit(
+        self, message: str, files: list[str] | None = None,
+    ) -> CommitInfo | None:
+        """Stage specified files and commit with the agent prefix.
 
+        If files is provided, only those paths are staged.
+        If files is None or empty, stages all changes (legacy fallback).
         Returns None if there are no changes to commit.
         """
         if not await self.is_repo():
             return None
 
-        st = await self.status()
-        if not st.has_changes:
-            return None
+        if files:
+            for f in files:
+                await self._run("git", "add", "--", f)
+        else:
+            st = await self.status()
+            if not st.has_changes:
+                return None
+            await self._run("git", "add", "-A")
 
-        await self._run("git", "add", "-A")
         await self._unstage_sensitive()
+
+        # Check if anything is actually staged
+        code, staged = await self._run("git", "diff", "--cached", "--name-only")
+        if code != 0 or not staged.strip():
+            return None
 
         full_msg = f"{AGENT_PREFIX} {message}"
         code, output = await self._run("git", "commit", "-m", full_msg)
