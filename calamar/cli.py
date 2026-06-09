@@ -26,7 +26,7 @@ except ImportError:
 
 BANNER = """\
 [bold]calamar[/bold] [dim]v0.3[/dim]
-[dim]Type your message, or /help for commands. Ctrl+C to interrupt, Ctrl+D to exit.[/dim]
+[dim]Type your message, or /help for commands. Alt+Enter for newline, Ctrl+D to exit.[/dim]
 """
 
 HELP_TEXT = """
@@ -167,6 +167,10 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
     bindings = KeyBindings()
 
+    @bindings.add("enter")
+    def _submit(event):
+        event.current_buffer.validate_and_handle()
+
     @bindings.add("escape", "enter")
     def _newline(event):
         event.current_buffer.insert_text("\n")
@@ -174,7 +178,8 @@ async def _run_repl(config: Config, verbose: bool) -> None:
     session = PromptSession(
         history=FileHistory(str(history_dir / "history")),
         key_bindings=bindings,
-        multiline=False,
+        multiline=True,
+        prompt_continuation="  ",
     )
 
     renderer = TerminalRenderer(verbose=verbose)
