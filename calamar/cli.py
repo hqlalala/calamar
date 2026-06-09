@@ -25,7 +25,7 @@ except ImportError:
         yield type("_Stub", (), {"server_count": 0, "tool_count": 0})()
 
 BANNER = """\
-[bold]calamar[/bold] [dim]v0.2[/dim]
+[bold]calamar[/bold] [dim]v0.3[/dim]
 [dim]Type your message, or /help for commands. Ctrl+C to interrupt, Ctrl+D to exit.[/dim]
 """
 

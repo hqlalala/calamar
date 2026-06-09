@@ -1,16 +1,21 @@
 # Calamar
 
-A modular AI agent engine built for coding tasks. Combines the best design patterns from Claude Code, OpenAI Codex, Cursor, Windsurf, Aider, and top SWE-Bench agents.
+A modular AI coding agent. Combines the best design patterns from Claude Code, OpenAI Codex, Cursor, Windsurf, Aider, and top SWE-Bench agents.
 
-## Core Design
+## Features
 
-- **Simple loop, complex periphery** — single-threaded agent loop with a layered middleware pipeline
+- **Streaming output** — typewriter-style response rendering
+- **Multi-provider** — native Anthropic (with prompt caching), OpenAI, Ducky/Aone
+- **MCP tools** — connect external tool servers via Model Context Protocol
+- **Built-in tools** — file read/write/edit, terminal, code search, directory listing, web fetch
+- **Code understanding** — tree-sitter repo map for multi-language symbol extraction
 - **Three-agent collaboration** — Planner / Executor / Verifier with generate-test-fix cycle
 - **Intelligent model routing** — auto-selects the best model per task complexity
-- **Middleware pipeline** — Guardrail → Permission → Cost → Trace → Cache
-- **Code understanding** — tree-sitter repo map + vector index for precise code localization
-- **Git-native workflow** — auto-commit, branch isolation, clean rollback
-- **Protocol-first** — MCP for tools, A2A for agent collaboration
+- **Middleware pipeline** — input guardrail → cost tracking → timing → output guardrail
+- **Context management** — progressive compaction with LLM-powered summarization
+- **Git-native workflow** — auto-commit, undo, diff, branch management
+- **Config files** — `~/.calamar/config.json` for global settings, `.calamar/config.json` per project
+- **Interactive REPL** — history, model switching, cost tracking, cache stats
 
 ## Install
 
@@ -18,25 +23,77 @@ A modular AI agent engine built for coding tasks. Combines the best design patte
 pip install calamar
 ```
 
-For development:
+With optional features:
 
 ```bash
-git clone https://github.com/hqlalala/calamar.git
-cd calamar
-pip install -e ".[dev]"
+pip install calamar[anthropic]     # Native Anthropic API
+pip install calamar[mcp]           # MCP tool integration
+pip install calamar[code-index]    # Tree-sitter code understanding
+pip install calamar[dev]           # Development tools
 ```
 
 ## Quick Start
 
+### CLI
+
+```bash
+# Interactive REPL (auto-detects provider from API key)
+export ANTHROPIC_API_KEY="sk-ant-..."
+calamar
+
+# One-shot mode
+calamar "Fix the bug in auth.py"
+
+# Specify model and provider
+calamar -m gpt-4o -p openai "Explain this code"
+```
+
+### Python API
+
 ```python
 from calamar import AgentLoop, Config
 
-config = Config(model="claude-sonnet-4-6-20250514")
+config = Config(model="claude-sonnet-4-6-20250514", api_key="...")
 agent = AgentLoop(config)
 
 async for event in agent.run("Fix the bug in auth.py"):
     print(event)
 ```
+
+## Configuration
+
+Create `~/.calamar/config.json` for global defaults:
+
+```json
+{
+  "model": "claude-sonnet-4-6-20250514",
+  "provider": "anthropic",
+  "api_key": "sk-ant-...",
+  "max_tokens": 8192,
+  "temperature": 0.0
+}
+```
+
+Project-level `.calamar/config.json` overrides global settings. CLI args and environment variables override both.
+
+### MCP Tools
+
+Create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+    }
+  }
+}
+```
+
+### Project Instructions
+
+Create `AGENT.md`, `.calamar.md`, or `CLAUDE.md` in your project root with project-specific instructions for the agent.
 
 ## Architecture
 
@@ -49,16 +106,28 @@ ContextBuilder (static prefix + dynamic suffix, maximize cache hits)
     ↓
 ModelRouter (task complexity → optimal model)
     ↓
-LLM Response
+Provider.stream() → StreamDelta (with retry + exponential backoff)
     ↓
-MiddlewarePipeline (guardrail → permission → cost → execute → trace)
+MiddlewarePipeline (guardrail → cost → timing → output redaction)
     ↓
 ToolRegistry (built-in + MCP tools)
     ↓
-ContextCompactor (5-level progressive compression)
-    ↓
-Checkpointer (save state, enable branching)
+ContextCompactor (truncation → LLM summarization → emergency trim)
 ```
+
+## REPL Commands
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show help |
+| `/clear` | Clear conversation history |
+| `/model` | Show / switch / list models |
+| `/cost` | Show session cost |
+| `/config` | Show current configuration |
+| `/verbose` | Toggle verbose mode |
+| `/undo` | Undo last agent commit |
+| `/diff` | Show uncommitted changes |
+| `/branch` | Show current branch |
 
 ## License
 
