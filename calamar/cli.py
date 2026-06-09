@@ -20,15 +20,17 @@ BANNER = """\
 
 HELP_TEXT = """
 [bold]Commands:[/bold]
-  /help     Show this help
-  /clear    Clear conversation history
-  /model    Show or switch model
-  /cost     Show session cost
-  /verbose  Toggle verbose mode
-  /undo     Undo last agent change
-  /diff     Show uncommitted changes
-  /branch   Show current branch
-  /exit     Exit
+  /help          Show this help
+  /clear         Clear conversation history
+  /model         Show current model
+  /model list    List available models
+  /model <name>  Switch model
+  /cost          Show session cost
+  /verbose       Toggle verbose mode
+  /undo          Undo last agent change
+  /diff          Show uncommitted changes
+  /branch        Show current branch
+  /exit          Exit
 """
 
 
@@ -115,8 +117,22 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                 agent.clear_history()
                 con.print("[dim]History cleared.[/dim]")
                 continue
-            elif cmd == "/model":
-                con.print(f"[dim]Current model: {config.model}[/dim]")
+            elif cmd == "/model" or cmd.startswith("/model "):
+                parts = user_input.strip().split(maxsplit=1)
+                if len(parts) == 1:
+                    con.print(f"[dim]Current model: {config.model}[/dim]")
+                elif parts[1].lower() == "list":
+                    con.print("[dim]Fetching models...[/dim]")
+                    models = await agent.provider.list_models()
+                    if models:
+                        for m in models:
+                            marker = " *" if m == config.model else ""
+                            con.print(f"[dim]  {m}{marker}[/dim]")
+                    else:
+                        con.print("[dim]Could not fetch model list.[/dim]")
+                else:
+                    config.model = parts[1]
+                    con.print(f"[dim]Switched to: {config.model}[/dim]")
                 continue
             elif cmd == "/cost":
                 con.print(f"[dim]Session cost: ${total_cost:.4f}[/dim]")

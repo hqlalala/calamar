@@ -61,6 +61,8 @@ class Provider(Protocol):
         max_tokens: int = 8192,
     ) -> AsyncIterator[StreamDelta]: ...
 
+    async def list_models(self) -> list[str]: ...
+
 
 def create_provider(config: Any) -> Provider:
     """Instantiate a provider based on config.provider field."""

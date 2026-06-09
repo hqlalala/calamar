@@ -216,6 +216,30 @@ class DuckyProvider:
                 continue
         return calls
 
+    async def list_models(self) -> list[str]:
+        encoded_token = base64.b64encode(
+            self._token.encode("utf-8")
+        ).decode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {encoded_token}",
+            "x-client-type": "calamar",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{self._base_url}/v1/models", headers=headers,
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                models = data.get("data", data.get("models", []))
+                return sorted(
+                    m.get("id", m.get("name", ""))
+                    for m in models if isinstance(m, dict)
+                )
+        except Exception:
+            return []
+
 
 def _build_tools_prompt(tools: list[dict[str, Any]]) -> str:
     """Convert OpenAI tool schemas to a text prompt for the model."""

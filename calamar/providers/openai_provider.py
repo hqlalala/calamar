@@ -147,3 +147,10 @@ class OpenAIProvider:
         if cache:
             token_usage.cache_read_tokens = getattr(cache, "cached_tokens", 0)
         return token_usage
+
+    async def list_models(self) -> list[str]:
+        try:
+            models = await self._client.models.list()
+            return sorted(m.id for m in models.data)
+        except Exception:
+            return []

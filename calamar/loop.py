@@ -100,6 +100,10 @@ class AgentLoop:
     def git(self) -> GitWorkflow:
         return self._git
 
+    @property
+    def provider(self):
+        return self._provider
+
     def set_role(self, role: AgentRole) -> None:
         """Switch the agent's active role (system prompt + tool profile)."""
         self._role = role
