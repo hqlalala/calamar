@@ -221,7 +221,9 @@ class AgentLoop:
 
             if self._compactor.needs_compaction(self._history):
                 before = len(self._history)
-                self._history = await self._compactor.compact(self._history)
+                self._history = await self._compactor.compact(
+                    self._history, summarizer=self._summarize_context,
+                )
                 yield CompactionEvent(from_messages=before, to_messages=len(self._history))
 
         if has_file_changes and await self._git.is_repo():
@@ -249,6 +251,35 @@ class AgentLoop:
                 )
             except asyncio.QueueEmpty:
                 break
+
+    _SUMMARIZE_PROMPT = (
+        "Summarize the conversation so far in a concise paragraph. Focus on: "
+        "(1) what the user asked for, (2) what files were read or modified, "
+        "(3) key decisions made, (4) current state of the task. "
+        "Be specific about file paths and changes. Keep it under 300 words."
+    )
+
+    async def _summarize_context(self, messages: list[Message]) -> str:
+        transcript = []
+        for msg in messages:
+            prefix = msg.role.upper()
+            content = msg.content[:500] if len(msg.content) > 500 else msg.content
+            transcript.append(f"[{prefix}] {content}")
+        combined = "\n".join(transcript)
+
+        try:
+            response = await self._provider.complete(
+                model=self._config.model,
+                messages=[
+                    {"role": "system", "content": self._SUMMARIZE_PROMPT},
+                    {"role": "user", "content": combined},
+                ],
+                temperature=0.0,
+                max_tokens=1024,
+            )
+            return f"[Conversation summary]\n{response.text}"
+        except Exception:
+            return f"[Summary of {len(messages)} earlier messages omitted for context]"
 
     def _inject_repo_map(self, project_root: str) -> None:
         try:
