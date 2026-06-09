@@ -245,10 +245,19 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
         con.print(f"[dim]Session: {sess_mgr.session_id}[/dim]")
 
+        def _prompt_text() -> str:
+            model_short = config.model.split("/")[-1]
+            if len(model_short) > 20:
+                model_short = model_short[:17] + "..."
+            parts = [model_short]
+            if plan_mode:
+                parts.append("plan")
+            return f"[{'|'.join(parts)}] > "
+
         while True:
             try:
                 con.print()
-                user_input = await session.prompt_async("> ")
+                user_input = await session.prompt_async(_prompt_text())
             except (EOFError, KeyboardInterrupt):
                 if agent.history:
                     sess_mgr.save(agent.history)
