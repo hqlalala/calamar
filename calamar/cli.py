@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
+from pathlib import Path
 
 from calamar.config import Config
 from calamar.events import ErrorEvent, TextEvent, ToolEvent
@@ -35,12 +37,42 @@ HELP_TEXT = """
   /model list    List available models
   /model <name>  Switch model
   /cost          Show session cost
+  /config        Show current configuration
   /verbose       Toggle verbose mode
   /undo          Undo last agent change
   /diff          Show uncommitted changes
   /branch        Show current branch
   /exit          Exit
 """
+
+_CONFIG_KEYS = ("model", "provider", "api_key", "base_url", "max_tokens", "temperature")
+
+
+def _load_config_files() -> dict[str, str]:
+    """Load config from ~/.calamar/config.json and .calamar/config.json."""
+    merged: dict[str, str] = {}
+
+    global_path = Path.home() / ".calamar" / "config.json"
+    if global_path.is_file():
+        try:
+            with open(global_path) as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                merged.update({k: v for k, v in data.items() if k in _CONFIG_KEYS})
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    project_path = Path.cwd() / ".calamar" / "config.json"
+    if project_path.is_file():
+        try:
+            with open(project_path) as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                merged.update({k: v for k, v in data.items() if k in _CONFIG_KEYS})
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return merged
 
 
 def _infer_provider(model: str) -> str:
@@ -51,7 +83,15 @@ def _infer_provider(model: str) -> str:
 
 
 def _build_config(args: argparse.Namespace) -> Config:
-    provider = args.provider or os.environ.get("CALAMAR_PROVIDER", "")
+    file_cfg = _load_config_files()
+
+    model = args.model
+    if model == "claude-sonnet-4-6-20250514" and "model" in file_cfg:
+        model = file_cfg["model"]
+
+    provider = args.provider or os.environ.get(
+        "CALAMAR_PROVIDER", file_cfg.get("provider", ""),
+    )
 
     if provider == "ducky":
         ducky_token = args.api_key or os.environ.get("AONE_TOKEN", "")
@@ -59,7 +99,7 @@ def _build_config(args: argparse.Namespace) -> Config:
             "AONE_BASE_URL", "https://ducky.code.alibaba-inc.com",
         )
         return Config(
-            model=args.model,
+            model=model,
             provider="ducky",
             base_url=base_url,
             ducky_token=ducky_token,
@@ -68,26 +108,35 @@ def _build_config(args: argparse.Namespace) -> Config:
 
     if not provider:
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if anthropic_key or args.model.startswith("claude-"):
+        if anthropic_key or model.startswith("claude-"):
             provider = "anthropic"
         else:
-            provider = _infer_provider(args.model)
+            provider = _infer_provider(model)
 
     if provider == "anthropic":
-        api_key = args.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        api_key = args.api_key or os.environ.get(
+            "ANTHROPIC_API_KEY", file_cfg.get("api_key", ""),
+        )
     else:
         api_key = args.api_key or os.environ.get(
             "OPENAI_API_KEY",
-            os.environ.get("ANTHROPIC_API_KEY", ""),
+            os.environ.get("ANTHROPIC_API_KEY", file_cfg.get("api_key", "")),
         )
 
-    base_url = args.base_url or os.environ.get("OPENAI_BASE_URL")
+    base_url = args.base_url or os.environ.get(
+        "OPENAI_BASE_URL", file_cfg.get("base_url"),
+    )
+
+    max_tokens = int(file_cfg.get("max_tokens", 8192))
+    temperature = float(file_cfg.get("temperature", 0.0))
 
     return Config(
-        model=args.model,
+        model=model,
         provider=provider,
         api_key=api_key,
         base_url=base_url,
+        max_tokens=max_tokens,
+        temperature=temperature,
         project_root=os.getcwd(),
     )
 
@@ -170,6 +219,16 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     continue
                 elif cmd == "/cost":
                     con.print(f"[dim]Session cost: ${total_cost:.4f}[/dim]")
+                    continue
+                elif cmd == "/config":
+                    con.print(f"[dim]  Model:       {config.model}[/dim]")
+                    con.print(f"[dim]  Provider:    {config.provider}[/dim]")
+                    con.print(f"[dim]  Max tokens:  {config.max_tokens}[/dim]")
+                    con.print(f"[dim]  Temperature: {config.temperature}[/dim]")
+                    if config.base_url:
+                        con.print(f"[dim]  Base URL:    {config.base_url}[/dim]")
+                    api_display = config.api_key[:8] + "..." if len(config.api_key) > 8 else "(not set)"
+                    con.print(f"[dim]  API key:     {api_display}[/dim]")
                     continue
                 elif cmd == "/verbose":
                     verbose = not verbose
