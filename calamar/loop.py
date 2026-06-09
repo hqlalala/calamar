@@ -120,6 +120,13 @@ class AgentLoop:
         """Clear all conversation history."""
         self._history.clear()
 
+    def undo_last_turn(self) -> None:
+        """Remove the last user message and all subsequent responses."""
+        for i in range(len(self._history) - 1, -1, -1):
+            if self._history[i].role == "user":
+                self._history = self._history[:i]
+                return
+
     def inject_steering(self, instruction: str) -> None:
         self._steering_queue.put_nowait(instruction)
 

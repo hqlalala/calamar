@@ -33,6 +33,7 @@ HELP_TEXT = """
 [bold]Commands:[/bold]
   /help          Show this help
   /clear         Clear conversation history
+  /retry         Retry last message
   /model         Show current model
   /model list    List available models
   /model <name>  Switch model
@@ -192,6 +193,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
             )
         agent = AgentLoop(config, tools=tools)
         total_cost = 0.0
+        last_user_input = ""
 
         while True:
             try:
@@ -215,8 +217,18 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     continue
                 elif cmd == "/clear":
                     agent.clear_history()
+                    last_user_input = ""
                     con.print("[dim]History cleared.[/dim]")
                     continue
+                elif cmd == "/retry":
+                    if not last_user_input:
+                        con.print("[dim]Nothing to retry.[/dim]")
+                        continue
+                    agent.undo_last_turn()
+                    user_input = last_user_input
+                    con.print(f"[dim]Retrying: {user_input[:60]}...[/dim]"
+                              if len(user_input) > 60
+                              else f"[dim]Retrying: {user_input}[/dim]")
                 elif cmd == "/model" or cmd.startswith("/model "):
                     parts = user_input.strip().split(maxsplit=1)
                     if len(parts) == 1:
@@ -281,11 +293,13 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     continue
 
             try:
+                last_user_input = user_input
                 async for event in agent.run(user_input):
                     renderer.render(event)
                     if hasattr(event, "cost_usd"):
                         total_cost += event.cost_usd
             except KeyboardInterrupt:
+                renderer.flush()
                 con.print("\n[dim]Interrupted.[/dim]")
 
 

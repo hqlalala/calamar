@@ -58,6 +58,11 @@ class TerminalRenderer:
             case ErrorEvent(error=error):
                 self._console.print(f"[bold red]Error:[/bold red] {error}")
 
+    def flush(self) -> None:
+        """Flush any pending stream buffer (e.g., after interrupt)."""
+        if self._streaming:
+            self._finalize_stream()
+
     def _finalize_stream(self) -> None:
         """Replace raw streamed text with markdown-rendered version."""
         text = self._stream_buffer.strip()
