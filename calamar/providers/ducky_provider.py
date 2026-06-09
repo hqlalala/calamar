@@ -1,4 +1,4 @@
-"""Ducky (Aone Copilot) provider — SSE streaming with prompt-based tool calling."""
+"""Ducky (Aone Copilot) provider — native + prompt-based tool calling."""
 
 from __future__ import annotations
 
@@ -30,12 +30,25 @@ _TOOL_CALL_RE = re.compile(
 
 _CHUNK_TIMEOUT = 30.0
 
+
+class _NativeUnsupported(Exception):
+    """Raised when /v1/chat/completions is not available."""
+
+
 JETBRAINS_BASE = Path.home() / "Library" / "Application Support" / "JetBrains"
 LINUX_JETBRAINS_BASE = Path.home() / ".config" / "JetBrains"
 
 
 class DuckyProvider:
-    """Provider for Alibaba Aone Copilot (Ducky) inference gateway."""
+    """Provider for Alibaba Aone Copilot (Ducky) inference gateway.
+
+    Supports two tool-calling modes:
+    - Native: OpenAI-compatible /v1/chat/completions with function calling
+    - Prompt-based: Custom /v1/chat with <tool_call> XML tags in the prompt
+
+    On first request with tools, tries native mode. If the endpoint returns
+    404/405, falls back to prompt-based and caches the result for the session.
+    """
 
     def __init__(self, config: Config) -> None:
         token = getattr(config, "ducky_token", "") or ""
@@ -48,6 +61,20 @@ class DuckyProvider:
             )
         self._token = token
         self._base_url = (config.base_url or "https://ducky.code.alibaba-inc.com").rstrip("/")
+        self._native_supported: bool | None = None
+
+    def _auth_headers(self, model: str = "") -> dict[str, str]:
+        encoded = base64.b64encode(self._token.encode("utf-8")).decode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {encoded}",
+            "Accept": "text/event-stream",
+            "x-plugin-version": "2.11.8-calamar",
+            "x-client-type": "calamar",
+        }
+        if model:
+            headers["X-Model-Name"] = model
+        return headers
 
     async def complete(
         self,
@@ -57,20 +84,30 @@ class DuckyProvider:
         temperature: float = 0.0,
         max_tokens: int = 8192,
     ) -> CompletionResponse:
-        chat_messages = self._convert_messages(messages, tools)
-        full_text = ""
-        async for delta in self._stream_sse(chat_messages, model):
-            full_text += delta
+        accumulated_text = ""
+        tool_calls: list[ToolCallData] = []
+        usage = TokenUsage(model=model)
 
-        tool_calls_parsed = self._parse_tool_calls(full_text)
-        cleaned_text = _TOOL_CALL_RE.sub("", full_text).strip()
+        async for delta in self.stream(
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        ):
+            if delta.text:
+                accumulated_text += delta.text
+            if delta.tool_calls:
+                tool_calls = delta.tool_calls
+            if delta.usage:
+                usage = delta.usage
 
-        finish_reason = "tool_calls" if tool_calls_parsed else "stop"
+        finish_reason = "tool_calls" if tool_calls else "stop"
         return CompletionResponse(
-            text=cleaned_text,
-            tool_calls=tool_calls_parsed,
+            text=accumulated_text,
+            tool_calls=tool_calls,
             finish_reason=finish_reason,
-            usage=TokenUsage(model=model),
+            usage=usage,
         )
 
     async def stream(
@@ -81,6 +118,156 @@ class DuckyProvider:
         temperature: float = 0.0,
         max_tokens: int = 8192,
     ) -> AsyncIterator[StreamDelta]:
+        if tools and self._native_supported is not False:
+            try:
+                async for delta in self._stream_native(
+                    model, messages, tools, temperature, max_tokens,
+                ):
+                    yield delta
+                self._native_supported = True
+                return
+            except _NativeUnsupported:
+                self._native_supported = False
+
+        async for delta in self._stream_prompt_based(
+            model, messages, tools, temperature, max_tokens,
+        ):
+            yield delta
+
+    # ── Native mode: OpenAI-compatible /v1/chat/completions ──────────
+
+    async def _stream_native(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncIterator[StreamDelta]:
+        """Stream via OpenAI-compatible endpoint with native tool calling."""
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            body["tools"] = tools
+
+        tc_id_map: dict[int, str] = {}
+        tc_name_map: dict[int, str] = {}
+        tc_args_map: dict[int, str] = {}
+        finish_reason: str | None = None
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=15.0),
+        ) as client:
+            async with client.stream(
+                "POST",
+                f"{self._base_url}/v1/chat/completions",
+                headers=self._auth_headers(model),
+                json=body,
+            ) as resp:
+                if resp.status_code in (404, 405):
+                    raise _NativeUnsupported()
+                if resp.status_code != 200:
+                    error_body = await resp.aread()
+                    raise RuntimeError(
+                        f"Ducky API error HTTP {resp.status_code}: "
+                        f"{error_body.decode('utf-8', errors='replace')[:500]}"
+                    )
+
+                line_iter = resp.aiter_lines()
+                while True:
+                    try:
+                        line = await asyncio.wait_for(
+                            anext(line_iter), timeout=_CHUNK_TIMEOUT,
+                        )
+                    except (StopAsyncIteration, TimeoutError):
+                        break
+
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if line == "data: [DONE]" or line == "[DONE]":
+                        break
+                    if not line.startswith("data:"):
+                        continue
+
+                    payload = line[5:].strip()
+                    if not payload or payload == "[DONE]":
+                        break
+
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choices = chunk.get("choices", [])
+                    if not choices:
+                        usage_data = chunk.get("usage")
+                        if usage_data:
+                            yield StreamDelta(usage=TokenUsage(
+                                prompt_tokens=usage_data.get("prompt_tokens", 0),
+                                completion_tokens=usage_data.get("completion_tokens", 0),
+                                total_tokens=usage_data.get("total_tokens", 0),
+                                model=model,
+                            ))
+                        continue
+
+                    choice = choices[0]
+                    delta = choice.get("delta", {})
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+
+                    content = delta.get("content")
+                    if content:
+                        yield StreamDelta(text=content)
+
+                    for tc_delta in delta.get("tool_calls", []):
+                        idx = tc_delta.get("index", 0)
+                        if tc_delta.get("id"):
+                            tc_id_map[idx] = tc_delta["id"]
+                        func = tc_delta.get("function", {})
+                        if func.get("name"):
+                            tc_name_map[idx] = func["name"]
+                        if func.get("arguments"):
+                            tc_args_map[idx] = (
+                                tc_args_map.get(idx, "") + func["arguments"]
+                            )
+
+        tool_calls = []
+        for idx in sorted(tc_id_map):
+            raw_args = tc_args_map.get(idx, "{}")
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append(ToolCallData(
+                id=tc_id_map[idx],
+                name=tc_name_map.get(idx, ""),
+                arguments=args,
+            ))
+
+        fr = "tool_calls" if tool_calls else (finish_reason or "stop")
+        yield StreamDelta(
+            tool_calls=tool_calls or None,
+            finish_reason=fr,
+            usage=TokenUsage(model=model),
+        )
+
+    # ── Prompt-based mode: custom /v1/chat with <tool_call> tags ─────
+
+    async def _stream_prompt_based(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncIterator[StreamDelta]:
+        """Stream via Ducky custom endpoint with prompt-based tool calling."""
         chat_messages = self._convert_messages(messages, tools)
         full_text = ""
         in_tool_call = False
@@ -144,24 +331,14 @@ class DuckyProvider:
         model: str,
     ) -> AsyncIterator[str]:
         """Yield text deltas from the Ducky SSE stream."""
-        encoded_token = base64.b64encode(
-            self._token.encode("utf-8")
-        ).decode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {encoded_token}",
-            "X-Model-Name": model,
-            "Accept": "text/event-stream",
-            "x-plugin-version": "2.11.8-calamar",
-            "x-client-type": "calamar",
-        }
+        headers = self._auth_headers(model)
         body = {"chatMessage": chat_messages, "needAppend": True}
 
         prev_len = 0
         tool_call_end_tag = "</tool_call>"
 
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=15.0)
+            timeout=httpx.Timeout(120.0, connect=15.0),
         ) as client:
             async with client.stream(
                 "POST", f"{self._base_url}/v1/chat",
@@ -212,6 +389,8 @@ class DuckyProvider:
                     if tool_call_end_tag in content:
                         break
 
+    # ── Helpers ───────────────────────────────────────────────────────
+
     def _parse_tool_calls(self, text: str) -> list[ToolCallData]:
         calls: list[ToolCallData] = []
         for match in _TOOL_CALL_RE.finditer(text):
@@ -228,13 +407,7 @@ class DuckyProvider:
         return calls
 
     async def list_models(self) -> list[str]:
-        encoded_token = base64.b64encode(
-            self._token.encode("utf-8")
-        ).decode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {encoded_token}",
-            "x-client-type": "calamar",
-        }
+        headers = self._auth_headers()
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
@@ -266,7 +439,7 @@ def _build_tools_prompt(tools: list[dict[str, Any]]) -> str:
     """Convert OpenAI tool schemas to a text prompt for the model."""
     lines = [
         "## Available Tools",
-        "Call a tool using: <tool_call>{\"name\":\"tool_name\",\"arguments\":{...}}</tool_call>",
+        'Call a tool using: <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>',
         "",
         "RULES:",
         "- Output ONLY ONE <tool_call> per response.",
