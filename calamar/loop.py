@@ -33,6 +33,8 @@ from calamar.middleware import (
     InputGuardrail,
     MiddlewarePipeline,
     OutputGuardrail,
+    PermissionCallback,
+    PermissionMiddleware,
     TimingMiddleware,
 )
 from calamar.providers import StreamDelta, create_provider
@@ -57,6 +59,7 @@ class AgentLoop:
         config: Config,
         tools: ToolRegistry | None = None,
         role: AgentRole | None = None,
+        permission_callback: PermissionCallback | None = None,
     ) -> None:
         self._config = config
         self._role = role or DEFAULT
@@ -73,13 +76,13 @@ class AgentLoop:
         self._provider = create_provider(config)
 
         self._cost = CostMiddleware(config.budget.daily_limit_usd)
-        self._pipeline = (
-            MiddlewarePipeline()
-            .use(InputGuardrail())
-            .use(self._cost)
-            .use(TimingMiddleware())
-            .use(OutputGuardrail())
-        )
+        self._pipeline = MiddlewarePipeline()
+        if permission_callback:
+            self._pipeline.use(PermissionMiddleware(permission_callback))
+        self._pipeline.use(InputGuardrail())
+        self._pipeline.use(self._cost)
+        self._pipeline.use(TimingMiddleware())
+        self._pipeline.use(OutputGuardrail())
 
         self._context_builder = ContextBuilder(
             system_prompt=self._role.system_prompt or config.system_prompt,

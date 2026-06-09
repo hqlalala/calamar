@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -34,6 +35,8 @@ class Middleware(Protocol):
 
 
 type CallNext = Any  # Callable[[MiddlewareContext], Awaitable[MiddlewareContext]]
+
+PermissionCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, bool]]
 
 
 class MiddlewarePipeline:
@@ -93,6 +96,48 @@ class InputGuardrail:
                 ctx.block(f"Dangerous pattern detected: {pattern}")
                 return ctx
         return await call_next(ctx)
+
+
+class PermissionMiddleware:
+    """Ask user confirmation before executing dangerous operations."""
+
+    _DANGEROUS_PREFIXES = (
+        "rm ", "rm\t", "rmdir ", "git push", "git reset", "git rebase",
+        "git checkout -- ", "git clean", "chmod ", "chown ", "kill ",
+        "killall ", "sudo ", "mkfs", "dd if=",
+    )
+
+    _SENSITIVE_PATH_PARTS = (
+        ".env", "credentials", ".secret", "id_rsa", "id_ed25519",
+        ".ssh/", ".aws/", "token", "password",
+    )
+
+    def __init__(self, callback: PermissionCallback) -> None:
+        self._callback = callback
+
+    async def process(
+        self, ctx: MiddlewareContext, call_next: Any,
+    ) -> MiddlewareContext:
+        if self._needs_permission(ctx):
+            allowed = await self._callback(ctx.tool_name, ctx.tool_args)
+            if not allowed:
+                ctx.block("Denied by user")
+                return ctx
+        return await call_next(ctx)
+
+    def _needs_permission(self, ctx: MiddlewareContext) -> bool:
+        if ctx.tool_name == "terminal":
+            cmd = ctx.tool_args.get("command", "").strip()
+            for prefix in self._DANGEROUS_PREFIXES:
+                if cmd.startswith(prefix) or f"&& {prefix}" in cmd or f"; {prefix}" in cmd:
+                    return True
+            return False
+
+        if ctx.tool_name == "file_write":
+            path = ctx.tool_args.get("path", "").lower()
+            return any(part in path for part in self._SENSITIVE_PATH_PARTS)
+
+        return False
 
 
 class OutputGuardrail:

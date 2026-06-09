@@ -151,6 +151,23 @@ async def _run_once(prompt: str, config: Config, verbose: bool) -> None:
             renderer.render(event)
 
 
+async def _ask_permission(tool_name: str, tool_args: dict) -> bool:
+    """Prompt the user for permission to run a dangerous operation."""
+    if tool_name == "terminal":
+        display = tool_args.get("command", str(tool_args)[:80])
+    else:
+        display = tool_args.get("path", str(tool_args)[:80])
+
+    loop = asyncio.get_running_loop()
+    try:
+        answer = await loop.run_in_executor(
+            None, lambda: input(f"\n  Allow {tool_name}: {display}? [y/N] "),
+        )
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
 async def _run_repl(config: Config, verbose: bool) -> None:
     from pathlib import Path
 
@@ -191,7 +208,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                 f"[dim]MCP: {mcp.server_count} server(s), "
                 f"{mcp.tool_count} tool(s)[/dim]"
             )
-        agent = AgentLoop(config, tools=tools)
+        agent = AgentLoop(config, tools=tools, permission_callback=_ask_permission)
         total_cost = 0.0
         last_user_input = ""
 
