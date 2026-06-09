@@ -4,18 +4,20 @@ A modular AI coding agent. Combines the best design patterns from Claude Code, O
 
 ## Features
 
-- **Streaming output** — typewriter-style response rendering
-- **Multi-provider** — native Anthropic (with prompt caching), OpenAI, Ducky/Aone
+- **Streaming output** — typewriter-style response with markdown re-rendering
+- **Multi-provider** — native Anthropic (with prompt caching), OpenAI, Ducky/Aone (with auto-detected native tool calling)
 - **MCP tools** — connect external tool servers via Model Context Protocol
 - **Built-in tools** — file read/write/edit, terminal, code search, directory listing, web fetch
 - **Code understanding** — tree-sitter repo map for multi-language symbol extraction
 - **Three-agent collaboration** — Planner / Executor / Verifier with generate-test-fix cycle
 - **Intelligent model routing** — auto-selects the best model per task complexity
-- **Middleware pipeline** — input guardrail → cost tracking → timing → output guardrail
-- **Context management** — progressive compaction with LLM-powered summarization
+- **Permission system** — asks confirmation before dangerous operations (rm, git push, sudo)
+- **Middleware pipeline** — permission → guardrail → cost → timing → output redaction
+- **Context management** — progressive compaction with LLM-powered summarization, manual /compact
 - **Git-native workflow** — auto-commit, undo, diff, branch management
-- **Config files** — `~/.calamar/config.json` for global settings, `.calamar/config.json` per project
-- **Interactive REPL** — history, model switching, cost tracking, cache stats
+- **Config files** — `~/.calamar/config.json` for global, `.calamar/config.json` per project
+- **Interactive REPL** — history, model switching, paste support, retry, cost tracking, cache stats
+- **Rich tool display** — colored diffs for edits, terminal output preview, thinking indicator
 
 ## Install
 
@@ -121,6 +123,9 @@ ContextCompactor (truncation → LLM summarization → emergency trim)
 |---------|-------------|
 | `/help` | Show help |
 | `/clear` | Clear conversation history |
+| `/retry` | Retry last message |
+| `/compact` | Compact context to free tokens |
+| `/context` | Show context usage |
 | `/model` | Show / switch / list models |
 | `/cost` | Show session cost |
 | `/config` | Show current configuration |
@@ -128,6 +133,7 @@ ContextCompactor (truncation → LLM summarization → emergency trim)
 | `/undo` | Undo last agent commit |
 | `/diff` | Show uncommitted changes |
 | `/branch` | Show current branch |
+| `/init` | Initialize project config |
 
 ## License
 
