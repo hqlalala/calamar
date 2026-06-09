@@ -14,6 +14,7 @@ from calamar.events import (
     CompactionEvent,
     ErrorEvent,
     Event,
+    RoleChangeEvent,
     TextEvent,
     ToolEvent,
     TurnEndEvent,
@@ -54,6 +55,8 @@ class TerminalRenderer:
                     self._console.print(
                         "[dim]context compacted[/dim]"
                     )
+            case RoleChangeEvent(to_role=to_role):
+                self._render_role_change(to_role)
             case ErrorEvent(error=error):
                 self._console.print(f"[bold red]Error:[/bold red] {error}")
 
@@ -187,3 +190,17 @@ class TerminalRenderer:
         if parts:
             summary = " | ".join(parts)
             self._console.print(f"\n[dim]{summary}[/dim]")
+
+    _ROLE_LABELS = {
+        "planner": "Planning",
+        "executor": "Executing",
+        "verifier": "Verifying",
+        "default": "Done",
+    }
+
+    def _render_role_change(self, to_role: str) -> None:
+        label = self._ROLE_LABELS.get(to_role, to_role)
+        if to_role == "default":
+            self._console.print(f"\n[dim]── {label} ──[/dim]")
+        else:
+            self._console.print(f"\n[bold cyan]── {label} ──[/bold cyan]")

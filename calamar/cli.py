@@ -12,6 +12,7 @@ from pathlib import Path
 from calamar.config import Config
 from calamar.events import ErrorEvent, TextEvent, ToolEvent
 from calamar.loop import AgentLoop
+from calamar.orchestrator import Orchestrator, OrchestratorConfig
 from calamar.render import TerminalRenderer
 from calamar.tools.defaults import create_default_registry
 
@@ -42,6 +43,7 @@ HELP_TEXT = """
   /cost          Show session cost
   /config        Show current configuration
   /verbose       Toggle verbose mode
+  /plan          Toggle plan mode (Planner→Executor→Verifier)
   /undo          Undo last agent change
   /diff          Show uncommitted changes
   /branch        Show current branch
@@ -184,7 +186,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
         _COMMANDS = (
             "/help", "/clear", "/retry", "/compact", "/context",
             "/model", "/model list", "/cost", "/config", "/verbose",
-            "/undo", "/diff", "/branch", "/init", "/exit",
+            "/plan", "/undo", "/diff", "/branch", "/init", "/exit",
         )
 
         def get_completions(self, document, complete_event):
@@ -229,6 +231,9 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                 f"{mcp.tool_count} tool(s)[/dim]"
             )
         agent = AgentLoop(config, tools=tools, permission_callback=_ask_permission)
+        orch_config = OrchestratorConfig(force_plan=False)
+        orchestrator = Orchestrator(agent, orch_config)
+        plan_mode = False
         total_cost = 0.0
         last_user_input = ""
 
@@ -302,6 +307,17 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     state = "on" if verbose else "off"
                     con.print(f"[dim]Verbose mode: {state}[/dim]")
                     continue
+                elif cmd == "/plan":
+                    plan_mode = not plan_mode
+                    orch_config.force_plan = plan_mode
+                    state = "on" if plan_mode else "off"
+                    con.print(f"[dim]Plan mode: {state}[/dim]")
+                    if plan_mode:
+                        con.print(
+                            "[dim]  Agent will plan before editing "
+                            "(Planner → Executor → Verifier)[/dim]"
+                        )
+                    continue
                 elif cmd == "/compact":
                     removed = await agent.compact()
                     if removed > 0:
@@ -348,7 +364,8 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
             try:
                 last_user_input = user_input
-                async for event in agent.run(user_input):
+                runner = orchestrator.run(user_input) if plan_mode else agent.run(user_input)
+                async for event in runner:
                     renderer.render(event)
                     if hasattr(event, "cost_usd"):
                         total_cost += event.cost_usd
