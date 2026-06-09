@@ -155,6 +155,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
     from rich.console import Console
 
     con = Console()
@@ -163,7 +164,18 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
     history_dir = Path.home() / ".calamar"
     history_dir.mkdir(exist_ok=True)
-    session = PromptSession(history=FileHistory(str(history_dir / "history")))
+
+    bindings = KeyBindings()
+
+    @bindings.add("escape", "enter")
+    def _newline(event):
+        event.current_buffer.insert_text("\n")
+
+    session = PromptSession(
+        history=FileHistory(str(history_dir / "history")),
+        key_bindings=bindings,
+        multiline=False,
+    )
 
     renderer = TerminalRenderer(verbose=verbose)
     tools = create_default_registry(working_dir=config.project_root or ".")
