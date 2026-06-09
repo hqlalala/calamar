@@ -28,8 +28,8 @@ def assistant_message(content: str) -> Message:
     return Message(role="assistant", content=content)
 
 
-def tool_result_message(tool_call_id: str, content: str) -> Message:
-    return Message(role="tool", content=content, tool_call_id=tool_call_id)
+def tool_result_message(tool_call_id: str, content: str, name: str = "") -> Message:
+    return Message(role="tool", content=content, tool_call_id=tool_call_id, name=name or None)
 
 
 class ContextBuilder:

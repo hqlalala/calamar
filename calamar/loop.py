@@ -245,7 +245,7 @@ class AgentLoop:
                     result_text = ctx.result.error or ctx.result.output
 
                 self._history.append(
-                    tool_result_message(tc.id, result_text)
+                    tool_result_message(tc.id, result_text, name=name)
                 )
 
                 yield ToolEvent(
