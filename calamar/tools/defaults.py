@@ -6,6 +6,7 @@ from calamar.tools.file import FileEditTool, FileReadTool, FileWriteTool
 from calamar.tools.registry import ToolRegistry
 from calamar.tools.search import ListDirectoryTool, SearchCodeTool
 from calamar.tools.terminal import TerminalTool
+from calamar.tools.web import WebFetchTool
 
 
 def _has_tree_sitter() -> bool:
@@ -24,6 +25,7 @@ def create_default_registry(working_dir: str = ".") -> ToolRegistry:
     registry.register(FileEditTool())
     registry.register(SearchCodeTool(working_dir=working_dir))
     registry.register(ListDirectoryTool(working_dir=working_dir))
+    registry.register(WebFetchTool())
 
     if _has_tree_sitter():
         from calamar.tools.code_index import CodeLocateTool, CodeMapTool

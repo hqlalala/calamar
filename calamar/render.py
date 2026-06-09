@@ -102,6 +102,9 @@ class TerminalRenderer:
             parts.append(f"{event.tool_calls} tool calls")
         if event.tokens_used > 0:
             parts.append(f"{event.tokens_used} tokens")
+        if event.cache_read_tokens > 0:
+            pct = event.cache_read_tokens * 100 // max(event.tokens_used, 1)
+            parts.append(f"cache {pct}%")
         if event.cost_usd > 0:
             parts.append(f"${event.cost_usd:.4f}")
 

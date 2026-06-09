@@ -53,6 +53,8 @@ class TurnEndEvent(Event):
     tool_calls: int = 0
     tokens_used: int = 0
     cost_usd: float = 0.0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     type: str = "turn_end"
 
 

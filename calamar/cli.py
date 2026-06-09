@@ -110,6 +110,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
 
     con = Console()
     con.print(BANNER)
+    con.print(f"[dim]Model: {config.model} ({config.provider})[/dim]")
 
     history_dir = Path.home() / ".calamar"
     history_dir.mkdir(exist_ok=True)

@@ -137,6 +137,8 @@ class AgentLoop:
         tool_call_count = 0
         total_tokens = 0
         total_cost = 0.0
+        total_cache_read = 0
+        total_cache_write = 0
         has_file_changes = False
         interrupted = False
 
@@ -167,6 +169,8 @@ class AgentLoop:
                     if delta.usage:
                         total_tokens += delta.usage.total_tokens
                         total_cost += delta.usage.cost_usd
+                        total_cache_read += delta.usage.cache_read_tokens
+                        total_cache_write += delta.usage.cache_write_tokens
             except KeyboardInterrupt:
                 interrupted = True
                 yield ErrorEvent(error="Interrupted by user", recoverable=True)
@@ -242,6 +246,8 @@ class AgentLoop:
             tool_calls=tool_call_count,
             tokens_used=total_tokens,
             cost_usd=total_cost,
+            cache_read_tokens=total_cache_read,
+            cache_write_tokens=total_cache_write,
         )
 
     def _select_model(self, user_input: str) -> str:

@@ -199,13 +199,14 @@ class TestListDirectoryTool:
 class TestDefaultRegistry:
     def test_creates_all_tools(self):
         registry = create_default_registry()
-        assert len(registry) >= 6
+        assert len(registry) >= 7
         assert "terminal" in registry
         assert "file_read" in registry
         assert "file_write" in registry
         assert "file_edit" in registry
         assert "search_code" in registry
         assert "list_directory" in registry
+        assert "web_fetch" in registry
 
     def test_code_index_tools_when_available(self):
         try:
@@ -218,14 +219,14 @@ class TestDefaultRegistry:
         if has_ts:
             assert "code_map" in registry
             assert "code_locate" in registry
-            assert len(registry) == 8
+            assert len(registry) == 9
         else:
             assert "code_map" not in registry
-            assert len(registry) == 6
+            assert len(registry) == 7
 
     def test_openai_schemas(self):
         registry = create_default_registry()
         schemas = registry.to_openai_tools()
-        assert len(schemas) >= 6
+        assert len(schemas) >= 7
         names = {s["function"]["name"] for s in schemas}
         assert "terminal" in names
