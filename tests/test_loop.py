@@ -148,6 +148,45 @@ class TestMiddleware:
         result = asyncio.run(cost.process(ctx, noop))
         assert result.blocked
 
+    def test_session_budget_blocks(self):
+        import asyncio
+        cost = CostMiddleware(session_limit_usd=0.50)
+        cost.record(0.60)
+
+        ctx = MiddlewareContext(tool_name="test", tool_args={})
+
+        async def noop(c):
+            return c
+
+        result = asyncio.run(cost.process(ctx, noop))
+        assert result.blocked
+        assert "Session budget" in result.block_reason
+
+    def test_session_spent_tracking(self):
+        cost = CostMiddleware()
+        cost.record(0.10)
+        cost.record(0.25)
+        assert cost.session_spent == pytest.approx(0.35)
+        assert cost.daily_spent == pytest.approx(0.35)
+
+    def test_budget_warning(self):
+        cost = CostMiddleware(session_limit_usd=1.0, warn_threshold=0.8)
+        cost.record(0.5)
+        assert cost.check_warning() is None
+
+        cost.record(0.35)
+        warning = cost.check_warning()
+        assert warning is not None
+        assert "85%" in warning
+
+        # Warning only fires once
+        assert cost.check_warning() is None
+
+    def test_no_warning_without_budget(self):
+        cost = CostMiddleware()
+        cost.record(100.0)
+        assert cost.check_warning() is None
+
     def test_pipeline_construction(self):
         pipeline = MiddlewarePipeline()
         pipeline.use(InputGuardrail())

@@ -185,19 +185,26 @@ calamar/
 - [x] 层级式代码定位
 - [ ] sqlite-vec 向量索引
 
-### v0.4 — Git 原生
+### v0.4 — Git 原生 + 交互增强
 
 - [x] 自动 commit + 分支隔离
 - [x] 安全回滚
+- [x] 粘贴支持（multiline prompt_toolkit）
+- [x] 权限系统（auto/normal/strict 模式）
+- [x] rich.Live 流式 Markdown 渲染
+- [x] 补全支持（tab 补全 REPL 命令）
 
-### v0.5 — 多 Agent
+### v0.5 — 多 Agent + 会话管理
 
 - [x] 三代理协作（Planner → Executor → Verifier）
+- [x] /plan 命令切换 Plan 模式
+- [x] MCP 工具集成（stdio 协议）
+- [x] Session 持久化（/sessions + /resume）
+- [x] 动态 REPL 提示符（显示模型 + 模式）
 - [ ] Subagent 委托 + 并行扇出
 
 ### v1.0 — 生产就绪
 
-- [ ] MCP 工具集成
 - [ ] 全链路追踪
-- [ ] Session 持久化 + 分叉
+- [ ] Session 分叉
 - [ ] 完整文档

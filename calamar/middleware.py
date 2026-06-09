@@ -194,9 +194,18 @@ class OutputGuardrail:
 class CostMiddleware:
     """Track token cost and enforce budget."""
 
-    def __init__(self, daily_limit_usd: float = 0.0) -> None:
+    def __init__(
+        self,
+        daily_limit_usd: float = 0.0,
+        session_limit_usd: float = 0.0,
+        warn_threshold: float = 0.8,
+    ) -> None:
         self._daily_limit = daily_limit_usd
+        self._session_limit = session_limit_usd
+        self._warn_threshold = warn_threshold
         self._daily_spent: float = 0.0
+        self._session_spent: float = 0.0
+        self._warned = False
 
     async def process(
         self, ctx: MiddlewareContext, call_next: Any,
@@ -204,15 +213,37 @@ class CostMiddleware:
         if self._daily_limit > 0 and self._daily_spent >= self._daily_limit:
             ctx.block(f"Daily budget exhausted (${self._daily_spent:.2f})")
             return ctx
+        if self._session_limit > 0 and self._session_spent >= self._session_limit:
+            ctx.block(f"Session budget exhausted (${self._session_spent:.2f})")
+            return ctx
         ctx = await call_next(ctx)
         return ctx
 
     def record(self, cost_usd: float) -> None:
         self._daily_spent += cost_usd
+        self._session_spent += cost_usd
+
+    def check_warning(self) -> str | None:
+        """Return a warning message if approaching budget limit."""
+        if self._warned:
+            return None
+        limit = self._session_limit or self._daily_limit
+        if limit <= 0:
+            return None
+        spent = self._session_spent if self._session_limit else self._daily_spent
+        if spent >= limit * self._warn_threshold:
+            self._warned = True
+            pct = int(spent * 100 / limit)
+            return f"Budget warning: ${spent:.4f} / ${limit:.4f} ({pct}% used)"
+        return None
 
     @property
     def daily_spent(self) -> float:
         return self._daily_spent
+
+    @property
+    def session_spent(self) -> float:
+        return self._session_spent
 
 
 class TimingMiddleware:

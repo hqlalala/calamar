@@ -75,7 +75,11 @@ class AgentLoop:
 
         self._provider = create_provider(config)
 
-        self._cost = CostMiddleware(config.budget.daily_limit_usd)
+        self._cost = CostMiddleware(
+            daily_limit_usd=config.budget.daily_limit_usd,
+            session_limit_usd=config.budget.session_limit_usd,
+            warn_threshold=config.budget.warn_threshold,
+        )
         self._permission: PermissionMiddleware | None = None
         self._pipeline = MiddlewarePipeline()
         if permission_callback:
