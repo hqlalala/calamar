@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import unicodedata
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -18,6 +19,11 @@ from calamar.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
+
+
+def _display_width(s: str) -> int:
+    """Terminal display width, accounting for CJK double-width characters."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in s)
 
 
 class TerminalRenderer:
@@ -92,7 +98,9 @@ class TerminalRenderer:
         width = self._console.width or 80
         visual_lines = 0
         for line in text.split("\n"):
-            visual_lines += max(1, (len(line) + width - 1) // width)
+            line_w = _display_width(line)
+            visual_lines += max(1, (line_w + width - 1) // width)
+        visual_lines += 1
 
         for _ in range(visual_lines):
             sys.stdout.write("\033[2K\033[A")
