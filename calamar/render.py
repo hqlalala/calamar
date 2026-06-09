@@ -109,43 +109,81 @@ class TerminalRenderer:
             self._console.print(text)
 
     def _render_tool(self, event: ToolEvent) -> None:
-        header = Text()
-        header.append("  ", style="bold yellow")
-        header.append(event.tool_name, style="bold yellow")
-
-        args_display = ""
-        if event.tool_name == "terminal":
-            args_display = event.tool_args.get("command", "")
-        elif event.tool_name in ("file_read", "file_write", "file_edit"):
-            args_display = event.tool_args.get("path", "")
-        elif event.tool_name == "search_code":
-            args_display = event.tool_args.get("pattern", "")
-        elif event.tool_name == "list_directory":
-            args_display = event.tool_args.get("path", ".")
-        else:
-            args_display = str(event.tool_args)[:80]
-
-        if args_display:
-            header.append(f" {args_display}", style="dim")
-
-        if event.duration_ms > 0:
-            header.append(f" ({event.duration_ms}ms)", style="dim")
-
-        self._console.print(header)
-
+        name = event.tool_name
+        args = event.tool_args
         result_str = str(event.result) if event.result else ""
 
-        if event.tool_name == "file_edit" and result_str:
+        if name == "file_read":
+            path = args.get("path", "")
+            self._console.print(Text(f"  ({path})", style="dim"))
+            if result_str:
+                lines = result_str.count("\n") + (1 if result_str else 0)
+                self._console.print(Text(f"  ⎿  Read {lines} lines", style="dim"))
+
+        elif name == "file_write":
+            path = args.get("path", "")
+            content = args.get("content", "")
+            lines = content.count("\n") + (1 if content else 0)
+            self._console.print(Text(f"  ({path})", style="dim"))
+            self._console.print(Text(f"  ⎿  Wrote {lines} lines", style="dim"))
+
+        elif name == "file_edit":
+            path = args.get("path", "")
+            old = args.get("old_string", "")
+            new = args.get("new_string", "")
+            old_lines = len(old.splitlines()) if old else 0
+            new_lines = len(new.splitlines()) if new else 0
+            added = max(0, new_lines - old_lines) + (new_lines if not old else 0)
+            removed = max(0, old_lines - new_lines) + (old_lines if not new else 0)
+
+            self._console.print(Text(f"  ({path})", style="dim"))
+            parts = []
+            if new_lines > 0:
+                parts.append(f"Added {new_lines} lines")
+            if old_lines > 0:
+                parts.append(f"removed {old_lines} lines")
+            summary = ", ".join(parts) if parts else "no changes"
+            self._console.print(Text(f"  ⎿  {summary}", style="dim"))
             self._render_edit_diff(event)
-        elif event.tool_name == "terminal" and result_str:
-            self._render_terminal_output(result_str)
-        elif result_str and self._verbose:
-            truncated = result_str[:500]
-            if len(result_str) > 500:
-                truncated += "..."
-            self._console.print(
-                Panel(truncated, border_style="dim", expand=False)
-            )
+
+        elif name == "terminal":
+            cmd = args.get("command", "")
+            self._console.print(Text(f"  $ {cmd}", style="bold"))
+            if result_str:
+                self._render_terminal_output(result_str)
+
+        elif name == "search_code":
+            pattern = args.get("pattern", "")
+            self._console.print(Text(f"  🔍 {pattern}", style="dim"))
+            if result_str:
+                matches = result_str.count("\n")
+                self._console.print(Text(f"  ⎿  {matches} matches", style="dim"))
+
+        elif name == "list_directory":
+            path = args.get("path", ".")
+            self._console.print(Text(f"  ({path})", style="dim"))
+            if result_str:
+                entries = result_str.count("\n")
+                self._console.print(Text(f"  ⎿  {entries} entries", style="dim"))
+
+        else:
+            header = Text()
+            header.append("  ", style="bold yellow")
+            header.append(name, style="bold yellow")
+            display = str(args)[:80]
+            if display:
+                header.append(f" {display}", style="dim")
+            self._console.print(header)
+            if result_str and self._verbose:
+                truncated = result_str[:500]
+                if len(result_str) > 500:
+                    truncated += "..."
+                self._console.print(
+                    Panel(truncated, border_style="dim", expand=False)
+                )
+
+        if event.duration_ms > 0 and self._verbose:
+            self._console.print(Text(f"     ({event.duration_ms}ms)", style="dim italic"))
 
     def _render_edit_diff(self, event: ToolEvent) -> None:
         old = event.tool_args.get("old_string", "")
