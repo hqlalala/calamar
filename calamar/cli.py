@@ -73,10 +73,18 @@ async def _run_once(prompt: str, config: Config, verbose: bool) -> None:
 
 
 async def _run_repl(config: Config, verbose: bool) -> None:
+    from pathlib import Path
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.history import FileHistory
     from rich.console import Console
 
     con = Console()
     con.print(BANNER)
+
+    history_dir = Path.home() / ".calamar"
+    history_dir.mkdir(exist_ok=True)
+    session = PromptSession(history=FileHistory(str(history_dir / "history")))
 
     renderer = TerminalRenderer(verbose=verbose)
     tools = create_default_registry(working_dir=config.project_root or ".")
@@ -86,7 +94,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
     while True:
         try:
             con.print()
-            user_input = con.input("[bold green]>[/bold green] ")
+            user_input = await session.prompt_async("> ")
         except (EOFError, KeyboardInterrupt):
             con.print("\n[dim]Goodbye.[/dim]")
             break
