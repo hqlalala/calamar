@@ -45,6 +45,7 @@ HELP_TEXT = """
   /undo          Undo last agent change
   /diff          Show uncommitted changes
   /branch        Show current branch
+  /init          Initialize project config
   /exit          Exit
 """
 
@@ -324,6 +325,9 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                     branch = await agent.git.current_branch()
                     con.print(f"[dim]Branch: {branch or '(detached)'}[/dim]")
                     continue
+                elif cmd == "/init":
+                    _init_project(config, con)
+                    continue
 
             try:
                 last_user_input = user_input
@@ -334,6 +338,51 @@ async def _run_repl(config: Config, verbose: bool) -> None:
             except KeyboardInterrupt:
                 renderer.flush()
                 con.print("\n[dim]Interrupted.[/dim]")
+
+
+_AGENT_MD_TEMPLATE = """\
+# Project Instructions
+
+<!-- Calamar reads this file to understand project-specific context. -->
+<!-- Edit it to match your project's needs. -->
+
+## Overview
+
+Describe your project here.
+
+## Code Style
+
+- Language:
+- Framework:
+- Conventions:
+
+## Important Notes
+
+-
+"""
+
+
+def _init_project(config: Config, con) -> None:
+    """Create .calamar/config.json and AGENT.md in the current directory."""
+    project_dir = Path.cwd() / ".calamar"
+    project_dir.mkdir(exist_ok=True)
+
+    config_path = project_dir / "config.json"
+    if config_path.exists():
+        con.print("[dim].calamar/config.json already exists, skipping.[/dim]")
+    else:
+        cfg = {"model": config.model, "provider": config.provider}
+        if config.base_url:
+            cfg["base_url"] = config.base_url
+        config_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        con.print(f"[dim]Created .calamar/config.json[/dim]")
+
+    agent_md = Path.cwd() / "AGENT.md"
+    if agent_md.exists():
+        con.print("[dim]AGENT.md already exists, skipping.[/dim]")
+    else:
+        agent_md.write_text(_AGENT_MD_TEMPLATE, encoding="utf-8")
+        con.print("[dim]Created AGENT.md — edit it with your project instructions.[/dim]")
 
 
 def main() -> None:
