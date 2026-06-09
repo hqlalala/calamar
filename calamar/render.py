@@ -27,8 +27,12 @@ class TerminalRenderer:
         self._streaming = False
         self._stream_buffer = ""
         self._stream_lines = 0
+        self._thinking = False
 
     def render(self, event: Event) -> None:
+        if self._thinking and not isinstance(event, TurnStartEvent):
+            self._stop_thinking()
+
         if not isinstance(event, TextEvent) and self._streaming:
             self._finalize_stream()
 
@@ -44,10 +48,7 @@ class TerminalRenderer:
             case ToolEvent():
                 self._render_tool(event)
             case TurnStartEvent():
-                if self._verbose:
-                    self._console.print(
-                        f"[dim]--- turn {event.turn_id} ---[/dim]"
-                    )
+                self._start_thinking()
             case TurnEndEvent():
                 self._render_turn_end(event)
             case CompactionEvent():
@@ -60,8 +61,22 @@ class TerminalRenderer:
 
     def flush(self) -> None:
         """Flush any pending stream buffer (e.g., after interrupt)."""
+        if self._thinking:
+            self._stop_thinking()
         if self._streaming:
             self._finalize_stream()
+
+    def _start_thinking(self) -> None:
+        self._thinking = True
+        self._console.print("[dim]Thinking...[/dim]", end="")
+        sys.stdout.flush()
+
+    def _stop_thinking(self) -> None:
+        if not self._thinking:
+            return
+        self._thinking = False
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
 
     def _finalize_stream(self) -> None:
         """Replace raw streamed text with markdown-rendered version."""
