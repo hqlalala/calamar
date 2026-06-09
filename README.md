@@ -4,15 +4,16 @@ A modular AI coding agent. Combines the best design patterns from Claude Code, O
 
 ## Features
 
-- **Streaming output** — typewriter-style response with markdown re-rendering
+- **Streaming output** — live markdown rendering with rich.Live
 - **Multi-provider** — native Anthropic (with prompt caching), OpenAI, Ducky/Aone (with auto-detected native tool calling)
 - **MCP tools** — connect external tool servers via Model Context Protocol
 - **Built-in tools** — file read/write/edit, terminal, code search, directory listing, web fetch
 - **Code understanding** — tree-sitter repo map for multi-language symbol extraction
-- **Three-agent collaboration** — Planner / Executor / Verifier with generate-test-fix cycle
+- **Plan mode** — Planner / Executor / Verifier pipeline with `/plan` toggle
 - **Intelligent model routing** — auto-selects the best model per task complexity
-- **Permission system** — asks confirmation before dangerous operations (rm, git push, sudo)
+- **Permission modes** — auto / normal / strict, switchable at runtime with `/permission`
 - **Middleware pipeline** — permission → guardrail → cost → timing → output redaction
+- **Session persistence** — auto-save conversations, resume with `/resume`
 - **Context management** — progressive compaction with LLM-powered summarization, manual /compact
 - **Git-native workflow** — auto-commit, undo, diff, branch management
 - **Config files** — `~/.calamar/config.json` for global, `.calamar/config.json` per project
@@ -130,6 +131,10 @@ ContextCompactor (truncation → LLM summarization → emergency trim)
 | `/cost` | Show session cost |
 | `/config` | Show current configuration |
 | `/verbose` | Toggle verbose mode |
+| `/plan` | Toggle plan mode (Planner → Executor → Verifier) |
+| `/permission` | Show or set permission mode (auto/normal/strict) |
+| `/sessions` | List recent sessions |
+| `/resume [id]` | Resume a previous session |
 | `/undo` | Undo last agent commit |
 | `/diff` | Show uncommitted changes |
 | `/branch` | Show current branch |
