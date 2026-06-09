@@ -66,6 +66,7 @@ class Config:
 
     system_prompt: str = ""
     project_root: str = ""
+    ducky_token: str = ""
 
     def model_config(self) -> ModelConfig:
         return ModelConfig(

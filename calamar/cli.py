@@ -33,6 +33,21 @@ HELP_TEXT = """
 
 
 def _build_config(args: argparse.Namespace) -> Config:
+    provider = args.provider or os.environ.get("CALAMAR_PROVIDER", "openai")
+
+    if provider == "ducky":
+        ducky_token = args.api_key or os.environ.get("AONE_TOKEN", "")
+        base_url = args.base_url or os.environ.get(
+            "AONE_BASE_URL", "https://ducky.code.alibaba-inc.com",
+        )
+        return Config(
+            model=args.model,
+            provider="ducky",
+            base_url=base_url,
+            ducky_token=ducky_token,
+            project_root=os.getcwd(),
+        )
+
     api_key = args.api_key or os.environ.get(
         "OPENAI_API_KEY",
         os.environ.get("ANTHROPIC_API_KEY", ""),
@@ -41,6 +56,7 @@ def _build_config(args: argparse.Namespace) -> Config:
 
     return Config(
         model=args.model,
+        provider=provider,
         api_key=api_key,
         base_url=base_url,
         project_root=os.getcwd(),
@@ -88,7 +104,7 @@ async def _run_repl(config: Config, verbose: bool) -> None:
                 con.print(HELP_TEXT)
                 continue
             elif cmd == "/clear":
-                agent._history.clear()
+                agent.clear_history()
                 con.print("[dim]History cleared.[/dim]")
                 continue
             elif cmd == "/model":
@@ -153,6 +169,10 @@ def main() -> None:
         help="Model to use (default: claude-sonnet-4-6-20250514)",
     )
     parser.add_argument(
+        "--provider", "-p", default="",
+        help="LLM provider: openai (default) or ducky (or set CALAMAR_PROVIDER)",
+    )
+    parser.add_argument(
         "--api-key", "-k", default="",
         help="API key (or set OPENAI_API_KEY env var)",
     )
@@ -168,7 +188,7 @@ def main() -> None:
     args = parser.parse_args()
     config = _build_config(args)
 
-    if not config.api_key:
+    if not config.api_key and config.provider != "ducky":
         print(
             "Error: No API key. Set OPENAI_API_KEY or use --api-key.",
             file=sys.stderr,

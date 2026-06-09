@@ -6,9 +6,6 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
-
-from openai import AsyncOpenAI
 
 from calamar.config import Config
 from calamar.context import (
@@ -24,7 +21,6 @@ from calamar.events import (
     ErrorEvent,
     Event,
     TextEvent,
-    TokenUsage,
     ToolEvent,
     TurnEndEvent,
     TurnStartEvent,
@@ -37,6 +33,7 @@ from calamar.middleware import (
     OutputGuardrail,
     TimingMiddleware,
 )
+from calamar.providers import create_provider
 from calamar.roles import DEFAULT, AgentRole
 from calamar.router import ModelRouter
 from calamar.tools.defaults import create_default_registry
@@ -71,15 +68,13 @@ class AgentLoop:
             config.context_window, config.compaction.threshold,
         )
 
-        self._client = AsyncOpenAI(
-            api_key=config.api_key or "not-set",
-            base_url=config.base_url,
-        )
+        self._provider = create_provider(config)
 
         self._cost = CostMiddleware(config.budget.daily_limit_usd)
         self._pipeline = (
             MiddlewarePipeline()
             .use(InputGuardrail())
+            .use(self._cost)
             .use(TimingMiddleware())
             .use(OutputGuardrail())
         )
@@ -105,6 +100,18 @@ class AgentLoop:
     def git(self) -> GitWorkflow:
         return self._git
 
+    def set_role(self, role: AgentRole) -> None:
+        """Switch the agent's active role (system prompt + tool profile)."""
+        self._role = role
+        self._context_builder = ContextBuilder(
+            system_prompt=role.system_prompt or self._config.system_prompt,
+            tool_schemas=self._tools.to_openai_tools(),
+        )
+
+    def clear_history(self) -> None:
+        """Clear all conversation history."""
+        self._history.clear()
+
     def inject_steering(self, instruction: str) -> None:
         self._steering_queue.put_nowait(instruction)
 
@@ -129,7 +136,7 @@ class AgentLoop:
             tools_schema = self._context_builder.tool_schemas or None
 
             try:
-                response = await self._client.chat.completions.create(
+                result = await self._provider.complete(
                     model=model,
                     messages=messages,
                     tools=tools_schema,
@@ -140,41 +147,36 @@ class AgentLoop:
                 yield ErrorEvent(error=str(e), recoverable=False)
                 break
 
-            choice = response.choices[0]
-            usage = self._record_usage(response, model)
-            total_tokens += usage.total_tokens
-            total_cost += usage.cost_usd
+            total_tokens += result.usage.total_tokens
+            total_cost += result.usage.cost_usd
 
-            if choice.finish_reason == "stop" or not choice.message.tool_calls:
-                text = choice.message.content or ""
-                self._history.append(assistant_message(text))
-                if text:
-                    yield TextEvent(text=text)
+            if result.finish_reason == "stop" or not result.tool_calls:
+                self._history.append(assistant_message(result.text))
+                if result.text:
+                    yield TextEvent(text=result.text)
                 break
 
-            tool_calls_raw = []
-            for tc in choice.message.tool_calls:
-                tool_calls_raw.append({
+            tool_calls_raw = [
+                {
                     "id": tc.id,
                     "type": "function",
                     "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments),
                     },
-                })
+                }
+                for tc in result.tool_calls
+            ]
 
             self._history.append(Message(
                 role="assistant",
-                content=choice.message.content or "",
+                content=result.text,
                 tool_calls=tool_calls_raw,
             ))
 
-            for tc in choice.message.tool_calls:
-                name = tc.function.name
-                try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
+            for tc in result.tool_calls:
+                name = tc.name
+                args = tc.arguments
 
                 ctx = await self._pipeline.execute(
                     tool_name=name,
@@ -204,7 +206,7 @@ class AgentLoop:
             if self._compactor.needs_compaction(self._history):
                 before = len(self._history)
                 self._history = await self._compactor.compact(self._history)
-                yield CompactionEvent(from_tokens=before, to_tokens=len(self._history))
+                yield CompactionEvent(from_messages=before, to_messages=len(self._history))
 
         if has_file_changes and await self._git.is_repo():
             summary = self._summarize_turn(user_input, tool_call_count)
@@ -232,22 +234,6 @@ class AgentLoop:
             except asyncio.QueueEmpty:
                 break
 
-    def _record_usage(self, response: Any, model: str) -> TokenUsage:
-        usage = response.usage
-        if usage is None:
-            return TokenUsage(model=model)
-
-        token_usage = TokenUsage(
-            prompt_tokens=usage.prompt_tokens or 0,
-            completion_tokens=usage.completion_tokens or 0,
-            total_tokens=usage.total_tokens or 0,
-            model=model,
-        )
-        cache = getattr(usage, "prompt_tokens_details", None)
-        if cache:
-            token_usage.cache_read_tokens = getattr(cache, "cached_tokens", 0)
-        return token_usage
-
     def _inject_repo_map(self, project_root: str) -> None:
         try:
             from calamar.code_index.repo_map import RepoMap
@@ -262,6 +248,7 @@ class AgentLoop:
                     f"# Repository Structure\n\n{text}"
                 )
         except Exception:
+            # Repo map is best-effort; failures here must not block agent startup.
             pass
 
     def _summarize_turn(self, user_input: str, tool_calls: int) -> str:

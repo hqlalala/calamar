@@ -17,8 +17,6 @@ from calamar.events import (
     TurnStartEvent,
 )
 
-console = Console()
-
 
 class TerminalRenderer:
     def __init__(self, verbose: bool = False) -> None:

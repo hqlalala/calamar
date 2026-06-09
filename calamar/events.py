@@ -28,8 +28,8 @@ class ToolEvent(Event):
 
 @dataclass
 class CompactionEvent(Event):
-    from_tokens: int = 0
-    to_tokens: int = 0
+    from_messages: int = 0
+    to_messages: int = 0
     type: str = "compaction"
 
 

@@ -7,7 +7,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import Enum
 
-from calamar.context import ContextBuilder, user_message
 from calamar.events import Event, RoleChangeEvent, TextEvent
 from calamar.loop import AgentLoop
 from calamar.roles import DEFAULT, EXECUTOR, PLANNER, VERIFIER, AgentRole
@@ -207,11 +206,7 @@ class Orchestrator:
             )
 
     def _switch_role(self, role: AgentRole) -> None:
-        self._agent._role = role
-        self._agent._context_builder = ContextBuilder(
-            system_prompt=role.system_prompt,
-            tool_schemas=self._agent._tools.to_openai_tools(),
-        )
+        self._agent.set_role(role)
 
     @staticmethod
     def _is_pass(verify_text: str) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -98,7 +99,11 @@ class OutputGuardrail:
     """Redact secrets from tool output."""
 
     SECRET_PATTERNS = [
-        "sk-", "ghp_", "gho_", "AKIA", "-----BEGIN",
+        r"sk-[A-Za-z0-9]{20,}",
+        r"ghp_[A-Za-z0-9]{36,}",
+        r"gho_[A-Za-z0-9]{36,}",
+        r"AKIA[A-Z0-9]{16}",
+        r"-----BEGIN [A-Z ]+ KEY-----[\s\S]*?-----END [A-Z ]+ KEY-----",
     ]
 
     async def process(
@@ -107,10 +112,9 @@ class OutputGuardrail:
         ctx = await call_next(ctx)
         if ctx.result and ctx.result.output:
             for pattern in self.SECRET_PATTERNS:
-                if pattern in ctx.result.output:
-                    ctx.result.output = ctx.result.output.replace(
-                        pattern, f"{pattern[:3]}***"
-                    )
+                ctx.result.output = re.sub(
+                    pattern, "***REDACTED***", ctx.result.output,
+                )
         return ctx
 
 

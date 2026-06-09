@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
 
 AGENT_PREFIX = "[calamar]"
 BRANCH_PREFIX = "calamar/"
+
+SENSITIVE_PATTERNS = (
+    ".env", ".env.local", ".env.production",
+    "credentials.json", "secrets.json", "service-account.json",
+    "*.pem", "*.key", "id_rsa", "id_ed25519",
+)
 
 
 @dataclass
@@ -86,6 +93,7 @@ class GitWorkflow:
             return None
 
         await self._run("git", "add", "-A")
+        await self._unstage_sensitive()
 
         full_msg = f"{AGENT_PREFIX} {message}"
         code, output = await self._run("git", "commit", "-m", full_msg)
@@ -195,6 +203,17 @@ class GitWorkflow:
                 continue
             commits.append(CommitInfo(sha=sha.strip(), message=msg.strip(), is_agent=is_agent))
         return commits
+
+    async def _unstage_sensitive(self) -> None:
+        """Remove files matching SENSITIVE_PATTERNS from the staging area."""
+        code, output = await self._run("git", "diff", "--cached", "--name-only")
+        if code != 0 or not output.strip():
+            return
+
+        for staged_file in output.strip().split("\n"):
+            name = Path(staged_file).name
+            if any(fnmatch.fnmatch(name, pat) for pat in SENSITIVE_PATTERNS):
+                await self._run("git", "reset", "HEAD", "--", staged_file)
 
     async def _find_last_agent_commit(self) -> str | None:
         commits = await self.log(count=20, agent_only=True)
