@@ -120,6 +120,8 @@ class TerminalRenderer:
             args_display = event.tool_args.get("path", "")
         elif event.tool_name == "search_code":
             args_display = event.tool_args.get("pattern", "")
+        elif event.tool_name == "list_directory":
+            args_display = event.tool_args.get("path", ".")
         else:
             args_display = str(event.tool_args)[:80]
 
@@ -132,13 +134,46 @@ class TerminalRenderer:
         self._console.print(header)
 
         result_str = str(event.result) if event.result else ""
-        if result_str and self._verbose:
+
+        if event.tool_name == "file_edit" and result_str:
+            self._render_edit_diff(event)
+        elif event.tool_name == "terminal" and result_str:
+            self._render_terminal_output(result_str)
+        elif result_str and self._verbose:
             truncated = result_str[:500]
             if len(result_str) > 500:
                 truncated += "..."
             self._console.print(
                 Panel(truncated, border_style="dim", expand=False)
             )
+
+    def _render_edit_diff(self, event: ToolEvent) -> None:
+        old = event.tool_args.get("old_string", "")
+        new = event.tool_args.get("new_string", "")
+        if not old and not new:
+            return
+
+        diff = Text()
+        for line in old.splitlines():
+            diff.append(f"  - {line}\n", style="red")
+        for line in new.splitlines():
+            diff.append(f"  + {line}\n", style="green")
+
+        self._console.print(diff, end="")
+
+    def _render_terminal_output(self, result_str: str) -> None:
+        lines = result_str.splitlines()
+        max_lines = 10 if self._verbose else 3
+        shown = lines[:max_lines]
+        remaining = len(lines) - max_lines
+
+        if shown:
+            output = Text()
+            for line in shown:
+                output.append(f"    {line}\n", style="dim")
+            if remaining > 0:
+                output.append(f"    ... {remaining} more lines\n", style="dim italic")
+            self._console.print(output, end="")
 
     def _render_turn_end(self, event: TurnEndEvent) -> None:
         parts = []
